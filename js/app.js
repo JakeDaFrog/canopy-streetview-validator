@@ -5,6 +5,7 @@
    ============================================================ */
 const CONFIG = {
   LS_API_KEY:       'sv_canopy_api_key',
+  LS_PROXY_URL:     'sv_canopy_proxy_url',   // Cloudflare Worker URL for history fetch
   BATCH_SIZE:       5,       // concurrent StreetViewService requests
   BATCH_DELAY_MS:   250,     // ms between batches (avoid rate-limits)
   DEFAULT_CENTER:   { lat: 37.7749, lng: -122.4194 },
@@ -313,13 +314,19 @@ async function processAllCoordinates() {
    ============================================================ */
 
 /**
- * Try the undocumented GeoPhotoService timeline endpoint from the browser.
- * This is the same endpoint the Python backend calls. CORS behaviour depends on
- * Google's server — it often works, but may fail in some network environments.
- * If it fails, we return { results: [], corsOk: false } and show a fallback link.
+ * Fetch historical panoramas for a location.
+ *
+ * Strategy:
+ *  1. If the user has configured a Cloudflare Worker proxy URL, route through it.
+ *     The Worker adds the Referer header Google requires and returns CORS headers.
+ *  2. Otherwise try the endpoint directly (will usually fail with CORS from a browser).
+ *  3. On failure return { results: [], corsOk: false } so the UI can show the fallback.
  */
 async function fetchHistoricalPanos(lat, lng) {
-  // Two pb payload variants (lat/lng order differs — both are tried by the Python code)
+  const proxyBase = localStorage.getItem(CONFIG.LS_PROXY_URL) || '';
+
+  // Two pb payload variants — lat/lng argument order differs between them.
+  // The Python backend tries both; we do the same.
   const pbVariants = [
     `!1m5!1sapiv3!5sen!11m2!1m1!1b0!2m2!1d${lng}!2d${lat}!3m10!2m2!1sen!2sus!9m1!1b1!6m3!1i640!2i640!3i90!4m8!1m2!1d${lng}!2d${lat}!2m2!1d${lat}!2d${lng}!3m2!1i203!2i100!4b1!5m1!1e2`,
     `!1m5!1sapiv3!5sen!11m2!1m1!1b0!2m2!1d${lat}!2d${lng}!3m10!2m2!1sen!2sus!9m1!1b1!6m3!1i640!2i640!3i90!4m8!1m2!1d${lat}!2d${lng}!2m2!1d${lat}!2d${lng}!3m2!1i203!2i100!4b1!5m1!1e2`,
@@ -327,8 +334,12 @@ async function fetchHistoricalPanos(lat, lng) {
 
   for (const pb of pbVariants) {
     try {
-      const url  = `${CONFIG.TIMELINE_URL}?pb=${encodeURIComponent(pb)}`;
-      const ctrl = new AbortController();
+      // Route through Cloudflare Worker proxy if configured, else try direct
+      const url = proxyBase
+        ? `${proxyBase.replace(/\/$/, '')}?pb=${encodeURIComponent(pb)}`
+        : `${CONFIG.TIMELINE_URL}?pb=${encodeURIComponent(pb)}`;
+
+      const ctrl  = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), CONFIG.TIMELINE_TIMEOUT);
 
       const resp = await fetch(url, { mode: 'cors', signal: ctrl.signal });
@@ -619,7 +630,19 @@ function setHistoryPanel(status, showFallback) {
     loadingEl.style.display = '';
     timeline.innerHTML = '<span class="muted">Loading historical imagery…</span>';
   } else if (status === 'cors-fail') {
-    timeline.innerHTML = '<span class="muted">Historical timeline unavailable from this browser (CORS). Use the Google Maps link →</span>';
+    timeline.innerHTML = '<span class="muted">No proxy configured — <a href="#" id="open-proxy-setup">add a Cloudflare Worker proxy</a> to enable the timeline, or use the Google Maps link →</span>';
+    // Wire the inline link to open the setup modal's proxy section
+    const link = document.getElementById('open-proxy-setup');
+    if (link) {
+      link.addEventListener('click', e => {
+        e.preventDefault();
+        document.getElementById('app').style.display = 'none';
+        document.getElementById('setup-modal').style.display = '';
+        document.getElementById('proxy-url-input').focus();
+        // Auto-expand the how-to steps
+        document.getElementById('proxy-help-steps').style.display = '';
+      });
+    }
   } else if (status === 'empty') {
     timeline.innerHTML = '<span class="muted">No historical imagery found for this location.</span>';
   } else if (status === null) {
@@ -1002,36 +1025,52 @@ document.addEventListener('DOMContentLoaded', () => {
   // UI listeners that don't depend on Google Maps load immediately
   setupUIListeners();
 
-  const input  = document.getElementById('api-key-input');
-  const submit = document.getElementById('api-key-submit');
+  const input     = document.getElementById('api-key-input');
+  const proxyInput = document.getElementById('proxy-url-input');
+  const submit    = document.getElementById('api-key-submit');
 
-  const stored = getStoredApiKey();
-  if (stored) input.value = stored;
+  // Restore saved values
+  const storedKey   = getStoredApiKey();
+  const storedProxy = localStorage.getItem(CONFIG.LS_PROXY_URL) || '';
+  if (storedKey)   input.value      = storedKey;
+  if (storedProxy) proxyInput.value = storedProxy;
+
+  // Proxy help toggle
+  document.getElementById('proxy-help-toggle').addEventListener('click', e => {
+    e.preventDefault();
+    const steps = document.getElementById('proxy-help-steps');
+    steps.style.display = steps.style.display === 'none' ? '' : 'none';
+  });
 
   const tryLoad = (key) => {
     if (!key || !key.startsWith('AIza')) {
       showApiKeyError('Please enter a valid Google Maps API key (starts with "AIza…").');
       return;
     }
+    // Save proxy URL (optional — empty string is fine)
+    const proxyVal = proxyInput.value.trim();
+    if (proxyVal) {
+      localStorage.setItem(CONFIG.LS_PROXY_URL, proxyVal);
+    } else {
+      localStorage.removeItem(CONFIG.LS_PROXY_URL);
+    }
+
     document.getElementById('api-key-error').style.display = 'none';
     storeApiKey(key);
     state.apiKey = key;
-    submit.disabled   = true;
+    submit.disabled    = true;
     submit.textContent = 'Loading Google Maps…';
     loadGoogleMaps(key);
   };
 
   submit.addEventListener('click', () => tryLoad(input.value.trim()));
-
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter') tryLoad(input.value.trim());
-  });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') tryLoad(input.value.trim()); });
 
   // Auto-load if we already have a key stored
-  if (stored) {
-    submit.disabled   = true;
+  if (storedKey) {
+    submit.disabled    = true;
     submit.textContent = 'Loading Google Maps…';
-    state.apiKey = stored;
-    loadGoogleMaps(stored);
+    state.apiKey = storedKey;
+    loadGoogleMaps(storedKey);
   }
 });

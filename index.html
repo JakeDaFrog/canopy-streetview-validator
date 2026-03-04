@@ -31,10 +31,38 @@
         <p class="hint-text">Your key is stored only in your browser's local storage — never sent to any server other than Google's.</p>
       </div>
 
+      <!-- Proxy URL (optional — needed for historical timeline) -->
+      <div class="modal-section">
+        <label class="form-label" for="proxy-url-input">
+          History Proxy URL
+          <span class="badge-optional">optional</span>
+        </label>
+        <input
+          type="text"
+          id="proxy-url-input"
+          class="form-input"
+          placeholder="https://your-worker.workers.dev"
+          autocomplete="off"
+          spellcheck="false"
+        >
+        <p class="hint-text">
+          Required for the <strong>historical imagery timeline</strong>.
+          Deploy the included <code>worker/index.js</code> to Cloudflare Workers (free) and paste the URL here.
+          <a href="#" id="proxy-help-toggle">How?</a>
+        </p>
+        <ol id="proxy-help-steps" class="setup-steps" style="display:none">
+          <li>Go to <a href="https://workers.cloudflare.com/" target="_blank" rel="noopener">workers.cloudflare.com</a> and sign up (free)</li>
+          <li>Click <strong>Create Worker</strong></li>
+          <li>Replace the default code with the contents of <code>worker/index.js</code> from this repo</li>
+          <li>Click <strong>Deploy</strong></li>
+          <li>Copy the <code>*.workers.dev</code> URL and paste it above</li>
+        </ol>
+      </div>
+
       <button id="api-key-submit" class="btn btn-primary btn-full">Load Tool</button>
 
       <details class="setup-details">
-        <summary>How to get an API key</summary>
+        <summary>How to get a Google Maps API key</summary>
         <ol>
           <li>Go to <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a></li>
           <li>Create or select a project and enable billing</li>

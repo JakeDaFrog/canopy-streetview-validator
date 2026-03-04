@@ -54,12 +54,26 @@ Then in your GitHub repo:
 
 Your site will be live at `https://YOUR_USERNAME.github.io/canopy-streetview-validator/`
 
-### 3. Share with your team
+### 3. Deploy the History Proxy (Cloudflare Worker)
+
+The historical imagery timeline requires a small server-side proxy to bypass a browser CORS restriction on Google's internal API. Cloudflare Workers are free (100k requests/day) and take ~5 minutes to set up.
+
+1. Go to [workers.cloudflare.com](https://workers.cloudflare.com/) and sign up for a free account
+2. Click **Create application → Create Worker**
+3. Replace the default code with the contents of **`worker/index.js`** from this repo
+4. Click **Deploy**
+5. Copy the `*.workers.dev` URL shown after deployment
+
+Each team member pastes this URL into the **"History Proxy URL"** field in the setup modal when they first open the tool. It is stored in their browser alongside their API key.
+
+> **Optional but highly recommended** — without it, the historical timeline is unavailable and you'll only see the most recent Street View capture.
+
+### 4. Share with your team
 
 Send your team the GitHub Pages URL. Each person:
 1. Opens the URL in their browser
-2. Enters their own Google Maps API key on first load (stored locally, never leaves their browser)
-3. Starts using the tool immediately
+2. Enters their Google Maps API key and the Worker proxy URL on first load
+3. Both are stored locally — nothing is ever committed to the repo
 
 ---
 
