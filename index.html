@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Street View Canopy Validator</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ============================================================
+       API KEY SETUP MODAL
+       ============================================================ -->
+  <div id="setup-modal" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-logo">🌳</div>
+      <h1 class="modal-title">Street View Canopy Validator</h1>
+      <p class="modal-subtitle">Ground-truth satellite canopy data using Google Street View historical imagery.</p>
+
+      <div class="modal-section">
+        <label class="form-label" for="api-key-input">Google Maps API Key</label>
+        <input
+          type="text"
+          id="api-key-input"
+          class="form-input"
+          placeholder="AIzaSy…"
+          autocomplete="off"
+          spellcheck="false"
+        >
+        <p id="api-key-error" class="error-text" style="display:none"></p>
+        <p class="hint-text">Your key is stored only in your browser's local storage — never sent to any server other than Google's.</p>
+      </div>
+
+      <button id="api-key-submit" class="btn btn-primary btn-full">Load Tool</button>
+
+      <details class="setup-details">
+        <summary>How to get an API key</summary>
+        <ol>
+          <li>Go to <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a></li>
+          <li>Create or select a project and enable billing</li>
+          <li>Enable <strong>Maps JavaScript API</strong> and <strong>Street View Static API</strong></li>
+          <li>Go to <strong>Credentials → Create API Key</strong></li>
+          <li><strong>Restrict the key</strong> to your GitHub Pages domain (e.g. <code>*.github.io/*</code>) for security</li>
+        </ol>
+      </details>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MAIN APPLICATION
+       ============================================================ -->
+  <div id="app" style="display:none">
+
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <span class="header-logo">🌳</span>
+        <span class="header-title">Street View Canopy Validator</span>
+      </div>
+      <div class="header-actions">
+        <button id="export-btn" class="btn btn-sm" title="Export results as CSV">↓ Export CSV</button>
+        <button id="clear-btn" class="btn btn-sm btn-ghost" title="Clear all results">✕ Clear</button>
+        <button id="settings-btn" class="btn btn-sm btn-ghost" title="Change API key">⚙ API Key</button>
+      </div>
+    </header>
+
+    <!-- Body -->
+    <div class="app-body">
+
+      <!-- ─── LEFT SIDEBAR ─── -->
+      <aside class="sidebar" id="sidebar">
+
+        <!-- Input Panel -->
+        <div class="panel">
+          <h2 class="panel-title">Input Coordinates</h2>
+
+          <div class="tab-bar">
+            <button class="tab-btn active" data-tab="paste">Paste / Type</button>
+            <button class="tab-btn" data-tab="upload">Upload CSV</button>
+            <button class="tab-btn" data-tab="single">Single Point</button>
+          </div>
+
+          <!-- Paste tab -->
+          <div id="tab-paste" class="tab-content">
+            <textarea
+              id="coord-textarea"
+              class="coord-textarea"
+              placeholder="Paste coordinates, one per line:
+
+35.2828, -120.6596
+35.2900, -120.6700, Tree A
+35.3000, -120.6800
+
+Formats accepted:
+  lat, lng
+  lat lng
+  lat, lng, label
+  lat,lng"
+            ></textarea>
+            <p class="hint-text">First two numbers on each line are read as lat, lng. An optional third field is used as a label.</p>
+          </div>
+
+          <!-- Upload tab -->
+          <div id="tab-upload" class="tab-content" style="display:none">
+            <div id="drop-zone" class="drop-zone">
+              <div class="drop-zone-inner">
+                <span class="drop-icon">📂</span>
+                <p>Drop a CSV file here<br>or click to browse</p>
+                <input type="file" id="file-input" accept=".csv,.txt" style="display:none">
+              </div>
+            </div>
+            <div id="csv-preview" class="csv-preview" style="display:none"></div>
+          </div>
+
+          <!-- Single point tab -->
+          <div id="tab-single" class="tab-content" style="display:none">
+            <div class="form-row">
+              <label class="form-label" for="single-lat">Latitude</label>
+              <input type="number" id="single-lat" class="form-input" placeholder="35.2828" step="any">
+            </div>
+            <div class="form-row">
+              <label class="form-label" for="single-lng">Longitude</label>
+              <input type="number" id="single-lng" class="form-input" placeholder="-120.6596" step="any">
+            </div>
+            <div class="form-row">
+              <label class="form-label" for="single-label">Label (optional)</label>
+              <input type="text" id="single-label" class="form-input" placeholder="Tree 1">
+            </div>
+            <button id="single-add-btn" class="btn btn-secondary btn-full">Add Point</button>
+            <p class="hint-text">Or click anywhere on the map to add a point.</p>
+          </div>
+
+          <!-- Search options -->
+          <div class="options-row">
+            <label class="form-label" for="search-radius">Search radius</label>
+            <select id="search-radius" class="form-select">
+              <option value="50">50 m</option>
+              <option value="100" selected>100 m</option>
+              <option value="200">200 m</option>
+              <option value="500">500 m</option>
+            </select>
+          </div>
+
+          <button id="process-btn" class="btn btn-primary btn-full">🔍 Find Street Views</button>
+
+          <!-- Progress -->
+          <div id="progress-area" style="display:none">
+            <div class="progress-bar-track">
+              <div id="progress-bar-fill" class="progress-bar-fill"></div>
+            </div>
+            <div class="progress-row">
+              <span id="progress-text">Processing…</span>
+              <button id="cancel-btn" class="btn btn-sm btn-danger">Cancel</button>
+            </div>
+          </div>
+
+          <div id="status-msg" class="status-msg" style="display:none"></div>
+        </div>
+
+        <!-- Results Panel -->
+        <div class="panel" id="results-panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Coordinates</h2>
+            <span id="results-badge" class="badge">0</span>
+          </div>
+          <div id="coord-list" class="coord-list">
+            <div class="empty-state">No coordinates loaded yet.<br><small>Paste coords, upload a CSV, or click the map.</small></div>
+          </div>
+        </div>
+
+      </aside>
+
+      <!-- ─── MAIN AREA ─── -->
+      <main class="main-area">
+
+        <!-- Map -->
+        <div id="map-wrap" class="map-wrap">
+          <div id="map"></div>
+          <div id="map-tip" class="map-tip">Click the map to add a point</div>
+        </div>
+
+        <!-- Viewer + History -->
+        <div class="viewer-wrap">
+
+          <!-- 360 Panorama viewer -->
+          <div id="viewer-section" class="viewer-section">
+            <div id="viewer-placeholder" class="viewer-placeholder">
+              <div>
+                <span class="placeholder-icon">🔭</span>
+                <p>Select a coordinate from the list<br>to view Street View imagery</p>
+              </div>
+            </div>
+            <div id="viewer"></div>
+          </div>
+
+          <!-- Historical timeline -->
+          <div id="history-panel" class="history-panel">
+            <div class="history-header">
+              <span class="history-label">Historical imagery</span>
+              <span id="history-count" class="badge" style="display:none"></span>
+              <span id="history-loading" class="spinner" style="display:none"></span>
+            </div>
+            <div id="history-timeline" class="history-timeline">
+              <span class="muted">Select a coordinate to load timeline</span>
+            </div>
+            <div id="history-fallback" class="history-fallback" style="display:none">
+              <a id="gmaps-link" href="#" target="_blank" rel="noopener" class="btn btn-sm btn-secondary">
+                🗺 Open in Google Maps (use time slider for history)
+              </a>
+            </div>
+          </div>
+
+        </div>
+      </main>
+
+    </div><!-- /.app-body -->
+  </div><!-- /#app -->
+
+  <script src="js/app.js"></script>
+</body>
+</html>
