@@ -66,7 +66,7 @@ function loadGoogleMaps(apiKey) {
 
 window._onMapsReady = function () {
   initMapAndPanorama();
-  setupEventListeners();
+  setupMapsListeners();   // listeners that require google.maps to exist
   showApp();
 };
 
@@ -838,41 +838,10 @@ function clearAll() {
 /* ============================================================
    EVENT LISTENERS
    ============================================================ */
-function setupEventListeners() {
-  // --- Process button ---
-  document.getElementById('process-btn').addEventListener('click', () => {
-    // Pull coordinates from the textarea if it has content
-    const text = document.getElementById('coord-textarea').value.trim();
-    if (text && state.rawCoords.length === 0) {
-      const { coords, errors } = parseCoordinatesFromText(text);
-      if (errors.length && !coords.length) {
-        showStatus(`Could not parse any coordinates:\n${errors[0]}`, 'error');
-        return;
-      }
-      state.rawCoords = coords;
-    }
-    processAllCoordinates();
-  });
-
-  // --- Cancel button ---
-  document.getElementById('cancel-btn').addEventListener('click', () => {
-    state.cancelled = true;
-  });
-
-  // --- Export button ---
-  document.getElementById('export-btn').addEventListener('click', exportResultsCSV);
-
-  // --- Clear button ---
-  document.getElementById('clear-btn').addEventListener('click', clearAll);
-
-  // --- Settings / API key reset ---
-  document.getElementById('settings-btn').addEventListener('click', () => {
-    if (confirm('Change API key? The page will reload.')) {
-      clearStoredApiKey();
-      location.reload();
-    }
-  });
-
+/**
+ * UI listeners that do NOT require google.maps — set up on DOMContentLoaded.
+ */
+function setupUIListeners() {
   // --- Tab switching ---
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -886,7 +855,7 @@ function setupEventListeners() {
     });
   });
 
-  // --- Textarea live parse (just updates count, doesn't process) ---
+  // --- Textarea live parse (updates count only, no processing) ---
   document.getElementById('coord-textarea').addEventListener('input', () => {
     const text = document.getElementById('coord-textarea').value.trim();
     if (!text) {
@@ -908,22 +877,47 @@ function setupEventListeners() {
   const dropZone  = document.getElementById('drop-zone');
 
   dropZone.addEventListener('click', () => fileInput.click());
-
-  fileInput.addEventListener('change', e => {
-    const f = e.target.files[0];
-    if (f) handleFileUpload(f);
-  });
-
-  dropZone.addEventListener('dragover', e => {
-    e.preventDefault();
-    dropZone.classList.add('drag-over');
-  });
+  fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFileUpload(e.target.files[0]); });
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
   dropZone.addEventListener('drop', e => {
     e.preventDefault();
     dropZone.classList.remove('drag-over');
-    const f = e.dataTransfer.files[0];
-    if (f) handleFileUpload(f);
+    if (e.dataTransfer.files[0]) handleFileUpload(e.dataTransfer.files[0]);
+  });
+
+  // --- Header buttons (no Maps dependency) ---
+  document.getElementById('export-btn').addEventListener('click', exportResultsCSV);
+  document.getElementById('clear-btn').addEventListener('click', clearAll);
+  document.getElementById('settings-btn').addEventListener('click', () => {
+    if (confirm('Change API key? The page will reload.')) {
+      clearStoredApiKey();
+      location.reload();
+    }
+  });
+}
+
+/**
+ * Listeners that require google.maps to be loaded — called from _onMapsReady.
+ */
+function setupMapsListeners() {
+  // --- Process button ---
+  document.getElementById('process-btn').addEventListener('click', () => {
+    const text = document.getElementById('coord-textarea').value.trim();
+    if (text && state.rawCoords.length === 0) {
+      const { coords, errors } = parseCoordinatesFromText(text);
+      if (errors.length && !coords.length) {
+        showStatus(`Could not parse any coordinates: ${errors[0]}`, 'error');
+        return;
+      }
+      state.rawCoords = coords;
+    }
+    processAllCoordinates();
+  });
+
+  // --- Cancel button ---
+  document.getElementById('cancel-btn').addEventListener('click', () => {
+    state.cancelled = true;
   });
 
   // --- Single point add button ---
@@ -932,7 +926,6 @@ function setupEventListeners() {
     const lng   = parseFloat(document.getElementById('single-lng').value);
     const label = document.getElementById('single-label').value.trim()
                   || `Point ${state.rawCoords.length + 1}`;
-
     if (!isValidLatLng(lat, lng)) {
       showStatus('Please enter valid latitude and longitude values.', 'error');
       return;
@@ -1006,6 +999,9 @@ function sleep(ms) {
    SETUP MODAL INITIALISATION  (runs immediately on DOM ready)
    ============================================================ */
 document.addEventListener('DOMContentLoaded', () => {
+  // UI listeners that don't depend on Google Maps load immediately
+  setupUIListeners();
+
   const input  = document.getElementById('api-key-input');
   const submit = document.getElementById('api-key-submit');
 
