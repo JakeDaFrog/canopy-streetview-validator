@@ -616,17 +616,37 @@ function getHistoricalPanosFromMapsApi(lat, lng) {
         }
         const panoLat = data.location.latLng.lat();
         const panoLng = data.location.latLng.lng();
-        // data.time is StreetViewTimeMachine[]: { pano: string, description: string }
-        // description is a locale date string e.g. "September 2025"
+
+        // Build initial list — try description first (locale string), then imageDate
         const panos = data.time
           .filter(t => t && t.pano)
           .map(t => ({
             panoId: t.pano,
-            date:   t.description || null,
+            date:   t.description || t.imageDate || null,
             lat:    panoLat,
             lng:    panoLng,
           }));
-        resolve(panos);
+
+        // If dates are missing (description not populated in this API version),
+        // fetch imageDate for each historical pano individually via getPanorama.
+        const allMissingDates = panos.every(p => !p.date);
+        if (!allMissingDates) {
+          resolve(panos);
+          return;
+        }
+
+        Promise.all(
+          panos.map(p => new Promise(res => {
+            state.svService.getPanorama({ pano: p.panoId }, (d, s) => {
+              res({
+                ...p,
+                date: (s === google.maps.StreetViewStatus.OK && d && d.imageDate)
+                  ? d.imageDate   // "YYYY-MM" format — formatDate() handles this
+                  : null,
+              });
+            });
+          }))
+        ).then(resolve);
       }
     );
   });
