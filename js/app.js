@@ -595,16 +595,66 @@ function hidePanorama() {
 /* ============================================================
    HISTORICAL TIMELINE LOADING & RENDERING
    ============================================================ */
+
+/**
+ * Primary approach: use the Maps JS API's built-in data.time array.
+ * getPanorama() already returns all historical panoramas — no proxy needed.
+ */
+function getHistoricalPanosFromMapsApi(lat, lng) {
+  return new Promise(resolve => {
+    state.svService.getPanorama(
+      {
+        location: { lat, lng },
+        radius: 200,
+        source: google.maps.StreetViewSource.OUTDOOR,
+        preference: google.maps.StreetViewPreference.NEAREST,
+      },
+      (data, status) => {
+        if (status !== google.maps.StreetViewStatus.OK || !data || !data.time || !data.time.length) {
+          resolve([]);
+          return;
+        }
+        const panoLat = data.location.latLng.lat();
+        const panoLng = data.location.latLng.lng();
+        // data.time is StreetViewTimeMachine[]: { pano: string, description: string }
+        // description is a locale date string e.g. "September 2025"
+        const panos = data.time
+          .filter(t => t && t.pano)
+          .map(t => ({
+            panoId: t.pano,
+            date:   t.description || null,
+            lat:    panoLat,
+            lng:    panoLng,
+          }));
+        resolve(panos);
+      }
+    );
+  });
+}
+
 async function loadAndRenderHistory(lat, lng) {
   setHistoryPanel('loading', false);
   state.history = 'loading';
 
+  // Step 1: Maps JS API (data.time) — no proxy, no CORS issues
+  const apiPanos = await getHistoricalPanosFromMapsApi(lat, lng);
+
+  if (apiPanos.length > 0) {
+    state.history = apiPanos;
+    renderHistoryTimeline(apiPanos);
+    const countEl = document.getElementById('history-count');
+    countEl.textContent = apiPanos.length;
+    countEl.style.display = '';
+    document.getElementById('history-loading').style.display = 'none';
+    document.getElementById('history-fallback').style.display = '';
+    return;
+  }
+
+  // Step 2: Fall back to Cloudflare Worker proxy (legacy)
   const { results, corsOk } = await fetchHistoricalPanos(lat, lng);
   state.history = results;
 
-  if (!corsOk && results.length === 0) {
-    setHistoryPanel('cors-fail', true);
-  } else if (results.length === 0) {
+  if (results.length === 0) {
     setHistoryPanel('empty', true);
   } else {
     renderHistoryTimeline(results);
@@ -629,20 +679,6 @@ function setHistoryPanel(status, showFallback) {
   if (status === 'loading') {
     loadingEl.style.display = '';
     timeline.innerHTML = '<span class="muted">Loading historical imagery…</span>';
-  } else if (status === 'cors-fail') {
-    timeline.innerHTML = '<span class="muted">No proxy configured — <a href="#" id="open-proxy-setup">add a Cloudflare Worker proxy</a> to enable the timeline, or use the Google Maps link →</span>';
-    // Wire the inline link to open the setup modal's proxy section
-    const link = document.getElementById('open-proxy-setup');
-    if (link) {
-      link.addEventListener('click', e => {
-        e.preventDefault();
-        document.getElementById('app').style.display = 'none';
-        document.getElementById('setup-modal').style.display = '';
-        document.getElementById('proxy-url-input').focus();
-        // Auto-expand the how-to steps
-        document.getElementById('proxy-help-steps').style.display = '';
-      });
-    }
   } else if (status === 'empty') {
     timeline.innerHTML = '<span class="muted">No historical imagery found for this location.</span>';
   } else if (status === null) {
