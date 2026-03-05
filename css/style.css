@@ -290,6 +290,27 @@ a:hover { text-decoration: underline; }
 
 .placeholder-icon { font-size: 2rem; display: block; margin-bottom: 10px; }
 
+/* mini reference map */
+.mini-map {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  width: 200px;
+  height: 160px;
+  border-radius: 10px;
+  border: 2px solid rgba(255,255,255,0.85);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.55);
+  z-index: 5;
+  overflow: hidden;
+  cursor: default;
+}
+
+/* suppress Google Maps UI chrome inside the mini map */
+.mini-map .gm-bundled-control,
+.mini-map .gmnoprint,
+.mini-map .gm-style-cc,
+.mini-map a[href*="maps.google"] { display: none !important; }
+
 /* history panel */
 .history-panel {
   flex-shrink: 0;

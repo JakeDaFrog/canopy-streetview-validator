@@ -27,11 +27,13 @@ const state = {
   history:      null,  // null | 'loading' | Array<panoRecord>
 
   // Google Maps objects
-  map:         null,
-  panorama:    null,
-  svService:   null,
-  markers:     [],     // parallel to results[]
-  infoWindow:  null,
+  map:                 null,
+  panorama:            null,
+  svService:           null,
+  markers:             [],     // parallel to results[]
+  infoWindow:          null,
+  miniMap:             null,   // small reference map overlaid on viewer
+  miniMapInputMarker:  null,   // red dot = the requested input coordinate
 };
 
 /* ============================================================
@@ -447,6 +449,18 @@ function initMapAndPanorama() {
       zoomControl:           true,
     }
   );
+
+  // Mini reference map — linked to the panorama so the blue pegman + FOV
+  // cone update automatically as the user pans around in Street View.
+  state.miniMap = new google.maps.Map(document.getElementById('mini-map'), {
+    zoom:               18,
+    center:             CONFIG.DEFAULT_CENTER,
+    disableDefaultUI:   true,
+    gestureHandling:    'none',   // non-interactive — reference only
+    clickableIcons:     false,
+    mapTypeId:          'roadmap',
+  });
+  state.miniMap.setStreetView(state.panorama);
 }
 
 /* ============================================================
@@ -574,6 +588,7 @@ async function selectCoordinate(idx) {
   }
 
   openPanorama(result.panoId);
+  updateMiniMap(result.inputLat, result.inputLng, result.panoLat, result.panoLng);
   updateGoogleMapsLink(result.panoLat, result.panoLng, result.panoId);
   await loadAndRenderHistory(result.panoLat, result.panoLng);
 }
@@ -586,9 +601,34 @@ function openPanorama(panoId) {
   state.panorama.setVisible(true);
 }
 
+function updateMiniMap(inputLat, inputLng, panoLat, panoLng) {
+  document.getElementById('mini-map').style.display = '';
+  // Keep mini map centred between the input point and the pano
+  state.miniMap.setCenter({ lat: panoLat, lng: panoLng });
+  state.miniMap.setZoom(18);
+
+  // Red dot = the requested input coordinate (target tree location)
+  if (state.miniMapInputMarker) state.miniMapInputMarker.setMap(null);
+  state.miniMapInputMarker = new google.maps.Marker({
+    position:  { lat: inputLat, lng: inputLng },
+    map:       state.miniMap,
+    title:     'Target coordinate',
+    zIndex:    10,
+    icon: {
+      path:        google.maps.SymbolPath.CIRCLE,
+      scale:       7,
+      fillColor:   '#dc2626',
+      fillOpacity: 1,
+      strokeColor: '#ffffff',
+      strokeWeight: 2,
+    },
+  });
+}
+
 function hidePanorama() {
   document.getElementById('viewer-placeholder').style.display = '';
   document.getElementById('viewer').style.display = 'none';
+  document.getElementById('mini-map').style.display = 'none';
   if (state.panorama) state.panorama.setVisible(false);
 }
 
