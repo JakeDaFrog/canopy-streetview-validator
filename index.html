@@ -231,22 +231,8 @@ Formats accepted:
 
             </div>
 
-            <!-- Street View historical timeline -->
-            <div id="history-panel" class="history-panel">
-              <div class="history-header">
-                <span class="history-label">Historical imagery</span>
-                <span id="history-count" class="badge" style="display:none"></span>
-                <span id="history-loading" class="spinner" style="display:none"></span>
-              </div>
-              <div id="history-timeline" class="history-timeline">
-                <span class="muted">Select a coordinate to load timeline</span>
-              </div>
-              <div id="history-fallback" class="history-fallback" style="display:none">
-                <a id="gmaps-link" href="#" target="_blank" rel="noopener" class="btn btn-sm btn-secondary">
-                  🗺 Open in Google Maps (use time slider for history)
-                </a>
-              </div>
-            </div>
+            <!-- Street View historical timeline is rendered inside the panorama
+                 controls (#pano-history-control) so it stays visible in fullscreen -->
 
           </div><!-- /#sv-view -->
 

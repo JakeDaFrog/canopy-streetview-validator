@@ -4,7 +4,8 @@
    CONFIGURATION
    ============================================================ */
 const CONFIG = {
-  BAKED_API_KEY:    '',      // Set this to your API key to skip the setup modal for all users
+  BAKED_API_KEY:    'AIzaSyDYCkIdpU-oKDEzG-aOP6RfxABTdLn0HMY',      // Set this to your API key to skip the setup modal for all users
+  BAKED_PROXY_URL:  '',  // Set to your Cloudflare Worker URL to use proxy without setup modal
   LS_API_KEY:       'sv_canopy_api_key',
   LS_PROXY_URL:     'sv_canopy_proxy_url',   // Cloudflare Worker URL for history fetch
   BATCH_SIZE:       5,       // concurrent StreetViewService requests
@@ -461,6 +462,11 @@ function initMapAndPanorama() {
 
   // History strip embedded inside the panorama — remains visible in fullscreen
   // because Google Maps only shows descendants of its own container.
+  const panoHistoryEl = document.createElement('div');
+  panoHistoryEl.id = 'pano-history-control';
+  panoHistoryEl.className = 'pano-history-control';
+  state.panorama.controls[google.maps.ControlPosition.BOTTOM_CENTER].push(panoHistoryEl);
+  state.panoHistoryEl = panoHistoryEl;
 }
 
 /* ============================================================
@@ -592,12 +598,11 @@ async function selectCoordinate(idx) {
   // Street View mode
   if (!result || !result.found) {
     hidePanorama();
-    setHistoryPanel(null, false);
+    setHistoryPanel(null);
     return;
   }
 
   openPanorama(result.panoId);
-  updateGoogleMapsLink(result.panoLat, result.panoLng, result.panoId);
   await loadAndRenderHistory(result.panoLat, result.panoLng);
 }
 
@@ -680,7 +685,7 @@ function getHistoricalPanosFromMapsApi(lat, lng) {
 }
 
 async function loadAndRenderHistory(lat, lng) {
-  setHistoryPanel('loading', false);
+  setHistoryPanel('loading');
   state.history = 'loading';
 
   // Step 1: Maps JS API (data.time) — no proxy, no CORS issues
@@ -689,11 +694,6 @@ async function loadAndRenderHistory(lat, lng) {
   if (apiPanos.length > 0) {
     state.history = apiPanos;
     renderHistoryTimeline(apiPanos);
-    const countEl = document.getElementById('history-count');
-    countEl.textContent = apiPanos.length;
-    countEl.style.display = '';
-    document.getElementById('history-loading').style.display = 'none';
-    document.getElementById('history-fallback').style.display = '';
     return;
   }
 
@@ -702,42 +702,28 @@ async function loadAndRenderHistory(lat, lng) {
   state.history = results;
 
   if (results.length === 0) {
-    setHistoryPanel('empty', true);
+    setHistoryPanel('empty');
   } else {
     renderHistoryTimeline(results);
-    const countEl = document.getElementById('history-count');
-    countEl.textContent = results.length;
-    countEl.style.display = '';
-    document.getElementById('history-fallback').style.display = '';
-    document.getElementById('history-loading').style.display = 'none';
   }
 }
 
-function setHistoryPanel(status, showFallback) {
-  const timeline  = document.getElementById('history-timeline');
-  const loadingEl = document.getElementById('history-loading');
-  const countEl   = document.getElementById('history-count');
-  const fallback  = document.getElementById('history-fallback');
-
-  countEl.style.display   = 'none';
-  loadingEl.style.display = 'none';
-  fallback.style.display  = showFallback ? '' : 'none';
+function setHistoryPanel(status) {
+  const panoCtrl = state.panoHistoryEl;
+  if (!panoCtrl) return;
 
   if (status === 'loading') {
-    loadingEl.style.display = '';
-    timeline.innerHTML = '<span class="muted">Loading historical imagery…</span>';
+    panoCtrl.innerHTML = '<span class="muted">Loading historical imagery…</span>';
   } else if (status === 'empty') {
-    timeline.innerHTML = '<span class="muted">No historical imagery found for this location.</span>';
+    panoCtrl.innerHTML = '<span class="muted">No historical imagery found.</span>';
   } else if (status === null) {
-    timeline.innerHTML = '<span class="muted">Select a coordinate to load timeline.</span>';
+    panoCtrl.innerHTML = '';
   }
 }
 
 function renderHistoryTimeline(panos) {
-  const timeline  = document.getElementById('history-timeline');
-  const loadingEl = document.getElementById('history-loading');
-  loadingEl.style.display = 'none';
-  timeline.innerHTML = '';
+  const panoCtrl = state.panoHistoryEl;
+  if (panoCtrl) panoCtrl.innerHTML = '';
 
   // Deduplicate by date (keep one per month)
   const seen = new Set();
@@ -749,43 +735,32 @@ function renderHistoryTimeline(panos) {
   });
 
   unique.forEach(item => {
-    // Build a button for a given parent container; all share the same click logic.
-    const makeBtn = () => {
-      const btn = document.createElement('button');
-      btn.className = 'history-btn';
-      btn.dataset.pano = item.panoId;
-      btn.title = `Panorama ID: ${item.panoId}\nDate: ${item.date || 'Unknown'}`;
-      btn.innerHTML = `
-        <span class="history-date">${formatDate(item.date)}</span>
-        <span class="history-id">${item.panoId.slice(0, 8)}…</span>
-      `;
-      btn.addEventListener('click', () => {
-        // Preserve heading/pitch so the user keeps looking the same direction.
-        const currentPov = (state.panorama && state.panorama.getVisible())
-          ? state.panorama.getPov()
-          : null;
-        // Mark active in both the main panel and the in-panorama strip.
-        document.querySelectorAll('.history-btn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll(`.history-btn[data-pano="${item.panoId}"]`)
-          .forEach(b => b.classList.add('active'));
-        openPanorama(item.panoId, currentPov);
-        if (item.lat && item.lng) {
-          state.map.panTo({ lat: item.lat, lng: item.lng });
-        }
-      });
-      return btn;
-    };
+    const btn = document.createElement('button');
+    btn.className = 'history-btn';
+    btn.dataset.pano = item.panoId;
+    btn.title = `Panorama ID: ${item.panoId}\nDate: ${item.date || 'Unknown'}`;
+    btn.innerHTML = `
+      <span class="history-date">${formatDate(item.date)}</span>
+      <span class="history-id">${item.panoId.slice(0, 8)}…</span>
+    `;
+    btn.addEventListener('click', () => {
+      // Preserve heading/pitch so the user keeps looking the same direction.
+      const currentPov = (state.panorama && state.panorama.getVisible())
+        ? state.panorama.getPov()
+        : null;
+      document.querySelectorAll('.history-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll(`.history-btn[data-pano="${item.panoId}"]`)
+        .forEach(b => b.classList.add('active'));
+      openPanorama(item.panoId, currentPov);
+      if (item.lat && item.lng) {
+        state.map.panTo({ lat: item.lat, lng: item.lng });
+      }
+    });
 
-    timeline.appendChild(makeBtn());
+    if (panoCtrl) panoCtrl.appendChild(btn);
   });
 }
 
-function updateGoogleMapsLink(lat, lng, panoId) {
-  const a = document.getElementById('gmaps-link');
-  if (a) {
-    a.href = `https://www.google.com/maps/@${lat},${lng},3a,75y,0h,90t/data=!3m4!1e1!3m2!1s${panoId}!2e0`;
-  }
-}
 
 /* ============================================================
    COORDINATE LIST RENDERING
@@ -946,7 +921,7 @@ function clearAll() {
   renderCoordList();
   hidePanorama();
   hideSatMap();
-  setHistoryPanel(null, false);
+  setHistoryPanel(null);
   hideStatus();
 
   document.getElementById('coord-textarea').value = '';
@@ -1188,7 +1163,7 @@ async function fetchWaybackYears() {
     : Object.entries(raw).map(([k, v]) => ({ releaseNum: parseInt(k, 10), ...v }));
 
   // Try the Cloudflare Worker proxy first (solves CORS), then direct URLs.
-  const proxyBase = localStorage.getItem(CONFIG.LS_PROXY_URL) || '';
+  const proxyBase = localStorage.getItem(CONFIG.LS_PROXY_URL) || CONFIG.BAKED_PROXY_URL || '';
   const SOURCES = [
     ...(proxyBase
       ? [[ `${proxyBase.replace(/\/$/, '')}?action=wayback-config`, configParser ]]
@@ -1213,7 +1188,10 @@ async function fetchWaybackYears() {
 
   for (const [url, parse] of SOURCES) {
     try {
-      const resp = await fetch(url);
+      const ctrl  = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const resp  = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timer);
       if (!resp.ok) continue;
       const raw  = await resp.json();
       const itemsArr = parse(raw);

@@ -356,6 +356,11 @@ a:hover { text-decoration: underline; }
 /* In-panorama history strip — rendered via panorama.controls so it
    stays visible when Street View goes fullscreen */
 .pano-history-control {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow-x: auto;
+  scrollbar-width: none;
   background: rgba(0, 0, 0, 0.55);
   border-radius: 20px;
   padding: 4px 10px;
@@ -365,35 +370,28 @@ a:hover { text-decoration: underline; }
   max-width: 70vw;
 }
 
-.pano-history-timeline {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.pano-history-timeline::-webkit-scrollbar { display: none; }
+.pano-history-control::-webkit-scrollbar { display: none; }
 
 /* Dark-background overrides for buttons inside the panorama strip */
-.pano-history-timeline .history-btn {
+.pano-history-control .history-btn {
   background: rgba(255, 255, 255, 0.12);
   border-color: rgba(255, 255, 255, 0.3);
   color: #fff;
 }
 
-.pano-history-timeline .history-btn:hover {
+.pano-history-control .history-btn:hover {
   background: rgba(255, 255, 255, 0.28);
   border-color: rgba(255, 255, 255, 0.6);
 }
 
-.pano-history-timeline .history-btn.active {
+.pano-history-control .history-btn.active {
   background: var(--color-primary-light);
   border-color: var(--color-primary-light);
 }
 
-.pano-history-timeline .history-date { color: #fff; }
-.pano-history-timeline .history-id   { color: rgba(255,255,255,.55); }
+.pano-history-control .history-date { color: #fff; }
+.pano-history-control .history-id   { color: rgba(255,255,255,.55); }
+.pano-history-control .muted        { color: rgba(255,255,255,.6); font-size: 0.8rem; }
 
 /* suppress Google Maps UI chrome inside the mini map */
 .mini-map .gm-bundled-control,
