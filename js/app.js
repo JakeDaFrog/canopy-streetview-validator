@@ -4,6 +4,7 @@
    CONFIGURATION
    ============================================================ */
 const CONFIG = {
+  BAKED_API_KEY:    '',      // Set this to your API key to skip the setup modal for all users
   LS_API_KEY:       'sv_canopy_api_key',
   LS_PROXY_URL:     'sv_canopy_proxy_url',   // Cloudflare Worker URL for history fetch
   BATCH_SIZE:       5,       // concurrent StreetViewService requests
@@ -34,6 +35,14 @@ const state = {
   infoWindow:          null,
   miniMap:             null,   // small reference map overlaid on viewer
   miniMapInputMarker:  null,   // red dot = the requested input coordinate
+
+  // Satellite History mode
+  satMap:              null,   // Google Map used in Satellite History panel
+  satMarker:           null,   // red dot on satellite map = input coordinate
+  satOverlay:          null,   // ESRI Wayback ImageMapType currently loaded
+  satYears:            [],     // [{releaseNum, year, label}] from ESRI Wayback config
+  satCurrentRelease:   null,   // releaseNum of the currently displayed year
+  currentViewerMode:   'sv',   // 'sv' | 'sat'
 };
 
 /* ============================================================
@@ -70,6 +79,7 @@ function loadGoogleMaps(apiKey) {
 window._onMapsReady = function () {
   initMapAndPanorama();
   setupMapsListeners();   // listeners that require google.maps to exist
+  fetchWaybackYears();    // background fetch of ESRI Wayback year list
   showApp();
 };
 
@@ -581,6 +591,15 @@ async function selectCoordinate(idx) {
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
   const result = state.results[idx];
+
+  if (state.currentViewerMode === 'sat') {
+    if (!result) return;
+    if (!state.satMap) initSatelliteMap();
+    activateSatView(result);
+    return;
+  }
+
+  // Street View mode
   if (!result || !result.found) {
     hidePanorama();
     setHistoryPanel(null, false);
@@ -946,6 +965,7 @@ function clearAll() {
   clearMarkers();
   renderCoordList();
   hidePanorama();
+  hideSatMap();
   setHistoryPanel(null, false);
   hideStatus();
 
@@ -1020,6 +1040,10 @@ function setupUIListeners() {
  * Listeners that require google.maps to be loaded — called from _onMapsReady.
  */
 function setupMapsListeners() {
+  // --- Viewer mode toggle ---
+  document.getElementById('mode-sv-btn').addEventListener('click',  () => switchViewerMode('sv'));
+  document.getElementById('mode-sat-btn').addEventListener('click', () => switchViewerMode('sat'));
+
   // --- Process button ---
   document.getElementById('process-btn').addEventListener('click', () => {
     const text = document.getElementById('coord-textarea').value.trim();
@@ -1090,6 +1114,209 @@ async function handleFileUpload(file) {
 }
 
 /* ============================================================
+   SATELLITE HISTORY — ESRI WAYBACK
+   ============================================================ */
+
+/**
+ * Lazily initialize the satellite map (called on first entry into sat mode).
+ * The map is created inside #sat-map which may be display:none; a resize
+ * event is triggered later when the div becomes visible.
+ */
+function initSatelliteMap() {
+  state.satMap = new google.maps.Map(document.getElementById('sat-map'), {
+    zoom:               18,
+    center:             CONFIG.DEFAULT_CENTER,
+    mapTypeId:          'satellite',
+    tilt:               0,
+    rotateControl:      false,
+    streetViewControl:  false,
+    mapTypeControl:     false,
+    fullscreenControl:  true,
+    zoomControl:        true,
+  });
+}
+
+/**
+ * Fetch the ESRI Wayback release catalogue.
+ * Groups releases by year (most recent release per year) and stores them in
+ * state.satYears so the year pills can be rendered on demand.
+ */
+async function fetchWaybackYears() {
+  try {
+    const resp = await fetch(
+      'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json'
+    );
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const items = await resp.json();
+
+    // One entry per calendar year — keep the highest releaseNum (most recent)
+    const byYear = {};
+    items.forEach(item => {
+      const year = item.releaseDate ? item.releaseDate.slice(0, 4) : null;
+      if (!year) return;
+      if (!byYear[year] || item.releaseNum > byYear[year].releaseNum) {
+        byYear[year] = {
+          releaseNum: item.releaseNum,
+          year,
+          label: item.releaseDateLabel || year,
+        };
+      }
+    });
+
+    // Newest year first
+    state.satYears = Object.values(byYear).sort((a, b) => b.year.localeCompare(a.year));
+
+    // If the user is already in sat mode with a coord selected, render pills now
+    if (state.currentViewerMode === 'sat' &&
+        document.getElementById('sat-map').style.display !== 'none') {
+      renderSatYearPills();
+    }
+  } catch (e) {
+    console.warn('[SatHistory] Could not fetch Wayback config:', e.message);
+    document.getElementById('sat-year-loading').style.display = 'none';
+    if (state.currentViewerMode === 'sat') {
+      document.getElementById('sat-year-timeline').innerHTML =
+        '<span class="muted">Could not load imagery years. Check your connection.</span>';
+    }
+  }
+}
+
+/**
+ * Switch between Street View mode ('sv') and Satellite History mode ('sat').
+ */
+function switchViewerMode(mode) {
+  state.currentViewerMode = mode;
+
+  document.getElementById('mode-sv-btn').classList.toggle('active', mode === 'sv');
+  document.getElementById('mode-sat-btn').classList.toggle('active', mode === 'sat');
+  document.getElementById('sv-view').style.display  = mode === 'sv'  ? '' : 'none';
+  document.getElementById('sat-view').style.display = mode === 'sat' ? '' : 'none';
+
+  if (mode === 'sat') {
+    if (!state.satMap) {
+      initSatelliteMap();
+    } else {
+      google.maps.event.trigger(state.satMap, 'resize');
+    }
+    if (state.selectedIdx !== null) {
+      const result = state.results[state.selectedIdx];
+      if (result) activateSatView(result);
+    }
+  }
+}
+
+/**
+ * Show the satellite map centred on result's input coordinate and
+ * render the year selector strip.
+ */
+function activateSatView(result) {
+  document.getElementById('sat-placeholder').style.display = 'none';
+  document.getElementById('sat-map').style.display = '';
+  google.maps.event.trigger(state.satMap, 'resize');
+
+  state.satMap.setCenter({ lat: result.inputLat, lng: result.inputLng });
+  state.satMap.setZoom(18);
+
+  if (state.satMarker) state.satMarker.setMap(null);
+  state.satMarker = new google.maps.Marker({
+    position:  { lat: result.inputLat, lng: result.inputLng },
+    map:       state.satMap,
+    title:     result.label || 'Target coordinate',
+    zIndex:    10,
+    icon: {
+      path:         google.maps.SymbolPath.CIRCLE,
+      scale:        8,
+      fillColor:    '#dc2626',
+      fillOpacity:  1,
+      strokeColor:  '#ffffff',
+      strokeWeight: 2.5,
+    },
+  });
+
+  renderSatYearPills();
+}
+
+/**
+ * Reset the satellite panel to its placeholder state (called on clearAll).
+ */
+function hideSatMap() {
+  document.getElementById('sat-placeholder').style.display = '';
+  document.getElementById('sat-map').style.display = 'none';
+  if (state.satMarker) { state.satMarker.setMap(null); state.satMarker = null; }
+  if (state.satOverlay && state.satMap) { state.satMap.overlayMapTypes.clear(); }
+  state.satOverlay      = null;
+  state.satCurrentRelease = null;
+  document.getElementById('sat-year-timeline').innerHTML =
+    '<span class="muted">Select a coordinate to load satellite history</span>';
+  document.getElementById('sat-year-count').style.display   = 'none';
+  document.getElementById('sat-year-loading').style.display = 'none';
+}
+
+/**
+ * Render year pill buttons in the satellite year strip.
+ * Restores the previously selected year if one exists, otherwise
+ * auto-loads the most recent year's imagery.
+ */
+function renderSatYearPills() {
+  const container = document.getElementById('sat-year-timeline');
+  const countEl   = document.getElementById('sat-year-count');
+  const loadingEl = document.getElementById('sat-year-loading');
+
+  if (!state.satYears.length) {
+    loadingEl.style.display = '';
+    container.innerHTML = '<span class="muted">Loading available years…</span>';
+    countEl.style.display = 'none';
+    return;
+  }
+
+  loadingEl.style.display = 'none';
+  countEl.textContent     = state.satYears.length;
+  countEl.style.display   = '';
+  container.innerHTML     = '';
+
+  state.satYears.forEach((item, i) => {
+    const isActive = state.satCurrentRelease
+      ? item.releaseNum === state.satCurrentRelease
+      : i === 0;
+    const btn = document.createElement('button');
+    btn.className = 'history-btn' + (isActive ? ' active' : '');
+    btn.title = item.label;
+    btn.innerHTML = `<span class="history-date">${item.year}</span>`;
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#sat-year-timeline .history-btn')
+        .forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadSatOverlay(item.releaseNum);
+    });
+    container.appendChild(btn);
+  });
+
+  // Auto-load on first render (no previous selection)
+  if (!state.satCurrentRelease && state.satYears.length) {
+    loadSatOverlay(state.satYears[0].releaseNum);
+  }
+}
+
+/**
+ * Load ESRI Wayback tiles for the given release number as a full-coverage
+ * overlay on top of the Google Maps satellite base layer.
+ */
+function loadSatOverlay(releaseNum) {
+  if (!state.satMap) return;
+  state.satCurrentRelease = releaseNum;
+  state.satMap.overlayMapTypes.clear();
+  state.satOverlay = new google.maps.ImageMapType({
+    getTileUrl: (coord, zoom) =>
+      `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/${releaseNum}/${zoom}/${coord.y}/${coord.x}`,
+    tileSize:  new google.maps.Size(256, 256),
+    maxZoom:   19,
+    minZoom:   1,
+    opacity:   1.0,
+  });
+  state.satMap.overlayMapTypes.push(state.satOverlay);
+}
+
+/* ============================================================
    HELPERS
    ============================================================ */
 function formatDate(dateStr) {
@@ -1124,6 +1351,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const input     = document.getElementById('api-key-input');
   const proxyInput = document.getElementById('proxy-url-input');
   const submit    = document.getElementById('api-key-submit');
+
+  // Baked key takes priority — skip modal entirely if set
+  if (CONFIG.BAKED_API_KEY) {
+    state.apiKey = CONFIG.BAKED_API_KEY;
+    loadGoogleMaps(CONFIG.BAKED_API_KEY);
+    return;
+  }
 
   // Restore saved values
   const storedKey   = getStoredApiKey();

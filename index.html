@@ -210,36 +210,75 @@ Formats accepted:
         <!-- Viewer + History -->
         <div class="viewer-wrap">
 
-          <!-- 360 Panorama viewer -->
-          <div id="viewer-section" class="viewer-section">
-            <div id="viewer-placeholder" class="viewer-placeholder">
-              <div>
-                <span class="placeholder-icon">🔭</span>
-                <p>Select a coordinate from the list<br>to view Street View imagery</p>
+          <!-- Viewer mode toggle -->
+          <div class="viewer-mode-bar">
+            <button class="viewer-mode-btn active" id="mode-sv-btn">⬤ Street View</button>
+            <button class="viewer-mode-btn" id="mode-sat-btn">🛰 Satellite History</button>
+          </div>
+
+          <!-- ── Street View mode ── -->
+          <div id="sv-view">
+
+            <!-- 360 Panorama viewer -->
+            <div id="viewer-section" class="viewer-section">
+              <div id="viewer-placeholder" class="viewer-placeholder">
+                <div>
+                  <span class="placeholder-icon">🔭</span>
+                  <p>Select a coordinate from the list<br>to view Street View imagery</p>
+                </div>
+              </div>
+              <div id="viewer"></div>
+
+              <!-- Mini reference map: shows input point + Street View camera heading -->
+              <div id="mini-map" class="mini-map" style="display:none"></div>
+            </div>
+
+            <!-- Street View historical timeline -->
+            <div id="history-panel" class="history-panel">
+              <div class="history-header">
+                <span class="history-label">Historical imagery</span>
+                <span id="history-count" class="badge" style="display:none"></span>
+                <span id="history-loading" class="spinner" style="display:none"></span>
+              </div>
+              <div id="history-timeline" class="history-timeline">
+                <span class="muted">Select a coordinate to load timeline</span>
+              </div>
+              <div id="history-fallback" class="history-fallback" style="display:none">
+                <a id="gmaps-link" href="#" target="_blank" rel="noopener" class="btn btn-sm btn-secondary">
+                  🗺 Open in Google Maps (use time slider for history)
+                </a>
               </div>
             </div>
-            <div id="viewer"></div>
 
-            <!-- Mini reference map: shows input point + Street View camera heading -->
-            <div id="mini-map" class="mini-map" style="display:none"></div>
-          </div>
+          </div><!-- /#sv-view -->
 
-          <!-- Historical timeline -->
-          <div id="history-panel" class="history-panel">
-            <div class="history-header">
-              <span class="history-label">Historical imagery</span>
-              <span id="history-count" class="badge" style="display:none"></span>
-              <span id="history-loading" class="spinner" style="display:none"></span>
+          <!-- ── Satellite History mode ── -->
+          <div id="sat-view" style="display:none">
+
+            <!-- Satellite map -->
+            <div id="sat-section" class="viewer-section">
+              <div id="sat-placeholder" class="viewer-placeholder">
+                <div>
+                  <span class="placeholder-icon">🛰</span>
+                  <p>Select a coordinate to view<br>satellite history imagery</p>
+                </div>
+              </div>
+              <div id="sat-map" style="display:none"></div>
             </div>
-            <div id="history-timeline" class="history-timeline">
-              <span class="muted">Select a coordinate to load timeline</span>
+
+            <!-- Year selector strip -->
+            <div id="sat-year-panel" class="history-panel">
+              <div class="history-header">
+                <span class="history-label">Imagery year</span>
+                <span id="sat-year-count" class="badge" style="display:none"></span>
+                <span id="sat-year-loading" class="spinner" style="display:none"></span>
+              </div>
+              <div id="sat-year-timeline" class="history-timeline">
+                <span class="muted">Select a coordinate to load satellite history</span>
+              </div>
             </div>
-            <div id="history-fallback" class="history-fallback" style="display:none">
-              <a id="gmaps-link" href="#" target="_blank" rel="noopener" class="btn btn-sm btn-secondary">
-                🗺 Open in Google Maps (use time slider for history)
-              </a>
-            </div>
-          </div>
+
+          </div><!-- /#sat-view -->
 
         </div>
       </main>
