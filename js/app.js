@@ -36,6 +36,7 @@ const state = {
   miniMap:             null,   // small reference map overlaid on viewer
   miniMapInputMarker:  null,   // red dot = the requested input coordinate
   panoHistoryControl:  null,   // history strip embedded in the panorama (visible in fullscreen)
+  svDirectionMarker:   null,   // rotating heading indicator on the main overview map
 
   // Satellite History mode
   satMap:              null,   // Google Map used in Satellite History panel
@@ -658,6 +659,9 @@ function hidePanorama() {
   document.getElementById('viewer').style.display = 'none';
   document.getElementById('mini-map').style.display = 'none';
   if (state.panorama) state.panorama.setVisible(false);
+  if (state.svDirectionMarker) {
+    state.svDirectionMarker.setVisible(false);
+  }
 }
 
 /* ============================================================
@@ -1068,6 +1072,10 @@ function setupMapsListeners() {
   document.getElementById('mode-sv-btn').addEventListener('click',  () => switchViewerMode('sv'));
   document.getElementById('mode-sat-btn').addEventListener('click', () => switchViewerMode('sat'));
 
+  // --- Street View direction marker on main map ---
+  state.panorama.addListener('pov_changed',      updateSvDirectionMarker);
+  state.panorama.addListener('position_changed', updateSvDirectionMarker);
+
   // --- Process button ---
   document.getElementById('process-btn').addEventListener('click', () => {
     const text = document.getElementById('coord-textarea').value.trim();
@@ -1138,6 +1146,63 @@ async function handleFileUpload(file) {
 }
 
 /* ============================================================
+   STREET VIEW DIRECTION MARKER
+   ============================================================ */
+
+/**
+ * Build a data-URI SVG for the direction marker.
+ * heading 0 = north, increases clockwise (same as Google Maps heading).
+ * The cone and arrow both rotate so they always point where the camera faces.
+ */
+function svDirectionSvg(heading) {
+  const h = (heading || 0).toFixed(1);
+  return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(
+    `<svg width="52" height="52" viewBox="0 0 52 52" xmlns="http://www.w3.org/2000/svg">
+      <g transform="rotate(${h},26,26)">
+        <path d="M26,26 L14,5 L38,5 Z"
+          fill="rgba(59,130,246,0.28)" stroke="rgba(59,130,246,0.65)"
+          stroke-width="1.5" stroke-linejoin="round"/>
+        <circle cx="26" cy="26" r="11"
+          fill="#3b82f6" stroke="white" stroke-width="2.5"/>
+        <polygon points="26,16 21,26 31,26" fill="white"/>
+      </g>
+    </svg>`
+  );
+}
+
+/**
+ * Create or update the rotating heading marker on the main overview map.
+ * Called on every pov_changed / position_changed event from the panorama.
+ */
+function updateSvDirectionMarker() {
+  if (!state.panorama || !state.panorama.getVisible()) return;
+  const pos = state.panorama.getPosition();
+  if (!pos) return;
+
+  const heading = (state.panorama.getPov() || {}).heading || 0;
+  const icon = {
+    url:        svDirectionSvg(heading),
+    scaledSize: new google.maps.Size(52, 52),
+    anchor:     new google.maps.Point(26, 26),
+  };
+
+  if (!state.svDirectionMarker) {
+    state.svDirectionMarker = new google.maps.Marker({
+      position:  pos,
+      map:       state.map,
+      icon,
+      zIndex:    500,
+      clickable: false,
+      title:     'Street View camera',
+    });
+  } else {
+    state.svDirectionMarker.setPosition(pos);
+    state.svDirectionMarker.setIcon(icon);
+    state.svDirectionMarker.setVisible(true);
+  }
+}
+
+/* ============================================================
    SATELLITE HISTORY — ESRI WAYBACK
    ============================================================ */
 
@@ -1166,24 +1231,44 @@ function initSatelliteMap() {
  * response formats. Groups releases by year (most recent per year).
  */
 async function fetchWaybackYears() {
-  const URLS = [
-    'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json',
-    'https://cdn.maptiles.arcgis.com/waybackconfig.json',
+  // Each entry describes [url, parserFn].
+  // Parser receives the parsed JSON and must return [{releaseNum, releaseDate, releaseDateLabel?}]
+  // or [] if this URL's format is not recognised.
+  const SOURCES = [
+    [
+      'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json',
+      raw => Array.isArray(raw)
+        ? raw
+        : Object.entries(raw).map(([k, v]) => ({ releaseNum: parseInt(k, 10), ...v })),
+    ],
+    [
+      'https://cdn.maptiles.arcgis.com/waybackconfig.json',
+      raw => Array.isArray(raw)
+        ? raw
+        : Object.entries(raw).map(([k, v]) => ({ releaseNum: parseInt(k, 10), ...v })),
+    ],
+    // ArcGIS MapServer REST endpoint — layers array where name contains the date
+    [
+      'https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer?f=json',
+      raw => {
+        if (!raw.layers || !Array.isArray(raw.layers)) return [];
+        const re = /(\d{4}-\d{2}-\d{2})/;
+        return raw.layers
+          .map(l => {
+            const m = String(l.name || '').match(re);
+            return m ? { releaseNum: l.id, releaseDate: m[1], releaseDateLabel: m[1] } : null;
+          })
+          .filter(Boolean);
+      },
+    ],
   ];
 
-  for (const url of URLS) {
+  for (const [url, parse] of SOURCES) {
     try {
       const resp = await fetch(url);
       if (!resp.ok) continue;
-      const raw = await resp.json();
-
-      // The config may be an array [{releaseNum, releaseDate, …}]
-      // or an object keyed by release number {"10011": {releaseDate, …}}.
-      const itemsArr = Array.isArray(raw)
-        ? raw
-        : Object.entries(raw).map(([key, val]) => ({
-            releaseNum: parseInt(key, 10), ...val,
-          }));
+      const raw  = await resp.json();
+      const itemsArr = parse(raw);
 
       const byYear = {};
       itemsArr.forEach(item => {
@@ -1199,16 +1284,15 @@ async function fetchWaybackYears() {
       });
 
       const years = Object.values(byYear).sort((a, b) => b.year.localeCompare(a.year));
-      if (!years.length) continue;   // try next URL if nothing parsed
+      if (!years.length) continue;
 
       state.satYears = years;
 
-      // Re-render pills if the user is already in sat mode with a coord open
       if (state.currentViewerMode === 'sat' &&
           document.getElementById('sat-map').style.display !== 'none') {
         renderSatYearPills();
       }
-      return;   // success — stop trying
+      return;
     } catch (e) {
       console.warn(`[SatHistory] Fetch failed (${url}):`, e.message);
     }
