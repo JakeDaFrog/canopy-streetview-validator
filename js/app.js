@@ -39,9 +39,9 @@ const state = {
   // Satellite History mode
   satMap:              null,   // Google Map used in Satellite History panel
   satMarker:           null,   // red dot on satellite map = input coordinate
-  satOverlay:          null,   // NASA GIBS ImageMapType currently loaded
-  satYears:            [],     // [{year, label}] from NASA GIBS static list
-  satCurrentRelease:   null,   // year string of the currently displayed overlay
+  satOverlay:          null,   // ESRI Wayback ImageMapType currently loaded
+  satYears:            [],     // [{releaseNum, year, label}] from ESRI Wayback
+  satCurrentRelease:   null,   // releaseNum of the currently displayed overlay
   currentViewerMode:   'sv',   // 'sv' | 'sat'
 };
 
@@ -79,7 +79,7 @@ function loadGoogleMaps(apiKey) {
 window._onMapsReady = function () {
   initMapAndPanorama();
   setupMapsListeners();   // listeners that require google.maps to exist
-  initGibsYears();        // build static NASA GIBS year list (no fetch needed)
+  fetchWaybackYears();    // fetch ESRI Wayback release list in background
   showApp();
 };
 
@@ -465,7 +465,7 @@ function initMapAndPanorama() {
   const panoHistoryEl = document.createElement('div');
   panoHistoryEl.id = 'pano-history-control';
   panoHistoryEl.className = 'pano-history-control';
-  state.panorama.controls[google.maps.ControlPosition.BOTTOM_CENTER].push(panoHistoryEl);
+  state.panorama.controls[google.maps.ControlPosition.LEFT_BOTTOM].push(panoHistoryEl);
   state.panoHistoryEl = panoHistoryEl;
 }
 
@@ -1130,7 +1130,7 @@ function updateSvDirectionMarker() {
 }
 
 /* ============================================================
-   SATELLITE HISTORY — NASA GIBS (Landsat annual composites)
+   SATELLITE HISTORY — ESRI Wayback
    ============================================================ */
 
 /**
@@ -1153,16 +1153,75 @@ function initSatelliteMap() {
 }
 
 /**
- * Build the static list of available NASA GIBS years (no fetch needed).
- * Source: Landsat WELD Annual True Color composites, 30 m resolution.
- * Coverage: continental global, 2001–2019.
+ * Fetch the ESRI Wayback release catalogue.
+ * Uses the MapServer REST endpoint which supports CORS, grouped by year.
+ * Falls back to the Cloudflare Worker proxy if BAKED_PROXY_URL is set.
  */
-function initGibsYears() {
-  const years = [];
-  for (let y = 2019; y >= 2001; y--) {
-    years.push({ year: String(y), label: String(y) });
+async function fetchWaybackYears() {
+  const proxyBase = localStorage.getItem(CONFIG.LS_PROXY_URL) || CONFIG.BAKED_PROXY_URL || '';
+
+  // MapServer REST endpoint is CORS-accessible (unlike the S3 config bucket).
+  // Try the worker proxy first if configured, then direct.
+  const SOURCES = [
+    ...(proxyBase ? [`${proxyBase.replace(/\/$/, '')}?action=wayback-config`] : []),
+    'https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer?f=json',
+  ];
+
+  for (const url of SOURCES) {
+    try {
+      const ctrl  = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      const resp  = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!resp.ok) continue;
+
+      const raw = await resp.json();
+
+      // Worker returns the Wayback config JSON (keyed object or array);
+      // direct MapServer returns { layers: [{id, name}] }.
+      let items = [];
+      if (raw.layers && Array.isArray(raw.layers)) {
+        // MapServer REST: layer name contains the date
+        const re = /(\d{4}-\d{2}-\d{2})/;
+        items = raw.layers.map(l => {
+          const m = String(l.name || '').match(re);
+          return m ? { releaseNum: l.id, releaseDate: m[1] } : null;
+        }).filter(Boolean);
+      } else {
+        // Worker proxies the Wayback config (array or keyed object)
+        const arr = Array.isArray(raw)
+          ? raw
+          : Object.entries(raw).map(([k, v]) => ({ releaseNum: parseInt(k, 10), ...v }));
+        items = arr.filter(i => i.releaseNum && i.releaseDate);
+      }
+
+      // One release per year (most recent)
+      const byYear = {};
+      items.forEach(({ releaseNum, releaseDate }) => {
+        const year = String(releaseDate).slice(0, 4);
+        if (!byYear[year] || releaseNum > byYear[year].releaseNum) {
+          byYear[year] = { releaseNum, year, label: releaseDate };
+        }
+      });
+
+      const years = Object.values(byYear).sort((a, b) => b.year.localeCompare(a.year));
+      if (!years.length) continue;
+
+      state.satYears = years;
+      if (state.currentViewerMode === 'sat' &&
+          document.getElementById('sat-map').style.display !== 'none') {
+        renderSatYearPills();
+      }
+      return;
+    } catch (e) {
+      console.warn(`[SatHistory] Fetch failed (${url}):`, e.message);
+    }
   }
-  state.satYears = years;
+
+  console.error('[SatHistory] Could not load Wayback release list');
+  document.getElementById('sat-year-loading').style.display = 'none';
+  document.getElementById('sat-year-timeline').innerHTML =
+    '<span class="muted">Could not load imagery years.</span>';
 }
 
 /**
@@ -1252,7 +1311,7 @@ function renderSatYearPills() {
 
   state.satYears.forEach((item, i) => {
     const isActive = state.satCurrentRelease
-      ? item.year === state.satCurrentRelease
+      ? item.releaseNum === state.satCurrentRelease
       : i === 0;
     const btn = document.createElement('button');
     btn.className = 'history-btn' + (isActive ? ' active' : '');
@@ -1262,31 +1321,30 @@ function renderSatYearPills() {
       document.querySelectorAll('#sat-year-timeline .history-btn')
         .forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      loadSatOverlay(item.year);
+      loadSatOverlay(item.releaseNum);
     });
     container.appendChild(btn);
   });
 
   // Auto-load on first render (no previous selection)
   if (!state.satCurrentRelease) {
-    loadSatOverlay(state.satYears[0].year);
+    loadSatOverlay(state.satYears[0].releaseNum);
   }
 }
 
 /**
- * Load NASA GIBS Landsat annual composite tiles for the given year as an
- * overlay on top of the Google Maps satellite base layer.
- * Layer: Landsat_WELD_CorrectedReflectance_TrueColor_Global_Annual (30 m, 2001–2019)
+ * Load ESRI Wayback tiles for the given release number as an overlay
+ * on top of the Google Maps satellite base layer.
  */
-function loadSatOverlay(year) {
+function loadSatOverlay(releaseNum) {
   if (!state.satMap) return;
-  state.satCurrentRelease = year;
+  state.satCurrentRelease = releaseNum;
   state.satMap.overlayMapTypes.clear();
   state.satOverlay = new google.maps.ImageMapType({
     getTileUrl: (coord, zoom) =>
-      `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/Landsat_WELD_CorrectedReflectance_TrueColor_Global_Annual/default/${year}-01-01/GoogleMapsCompatible/${zoom}/${coord.y}/${coord.x}.jpg`,
+      `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/${releaseNum}/${zoom}/${coord.y}/${coord.x}`,
     tileSize:  new google.maps.Size(256, 256),
-    maxZoom:   13,
+    maxZoom:   23,
     minZoom:   1,
     opacity:   1.0,
   });
