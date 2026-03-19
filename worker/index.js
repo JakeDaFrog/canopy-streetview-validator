@@ -8,7 +8,8 @@
  */
 
 const ALLOWED_ORIGIN_PATTERN = /^https?:\/\/(localhost(:\d+)?|.+\.github\.io)$/;
-const TARGET_BASE = 'https://maps.googleapis.com/maps/api/js/GeoPhotoService.SingleImageSearch';
+const GOOGLE_HISTORY_BASE    = 'https://maps.googleapis.com/maps/api/js/GeoPhotoService.SingleImageSearch';
+const WAYBACK_CONFIG_URL     = 'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json';
 
 export default {
   async fetch(request) {
@@ -16,10 +17,7 @@ export default {
 
     // CORS preflight
     if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        status: 204,
-        headers: corsHeaders(origin),
-      });
+      return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
 
     if (request.method !== 'GET') {
@@ -27,16 +25,36 @@ export default {
     }
 
     const url    = new URL(request.url);
-    const pb     = url.searchParams.get('pb');
+    const action = url.searchParams.get('action');
 
-    if (!pb) {
-      return new Response('Missing required "pb" query parameter', { status: 400 });
+    // ── Route: ESRI Wayback release config ──────────────────────────────────
+    if (action === 'wayback-config') {
+      let resp;
+      try {
+        resp = await fetch(WAYBACK_CONFIG_URL);
+      } catch (err) {
+        return new Response(`Upstream fetch failed: ${err.message}`, { status: 502, headers: corsHeaders(origin) });
+      }
+      const body = await resp.text();
+      return new Response(body, {
+        status: resp.status,
+        headers: {
+          'Content-Type':  'application/json;charset=utf-8',
+          'Cache-Control': 'public, max-age=86400',
+          ...corsHeaders(origin),
+        },
+      });
     }
 
-    // Forward to Google with the headers it expects
+    // ── Route: Google Street View history (existing) ─────────────────────────
+    const pb = url.searchParams.get('pb');
+    if (!pb) {
+      return new Response('Missing required "pb" or "action" query parameter', { status: 400 });
+    }
+
     let googleResp;
     try {
-      googleResp = await fetch(`${TARGET_BASE}?pb=${encodeURIComponent(pb)}`, {
+      googleResp = await fetch(`${GOOGLE_HISTORY_BASE}?pb=${encodeURIComponent(pb)}`, {
         headers: {
           'Referer':    'https://www.google.com/maps',
           'Accept':     '*/*',
@@ -48,12 +66,11 @@ export default {
     }
 
     const body = await googleResp.text();
-
     return new Response(body, {
       status: googleResp.status,
       headers: {
         'Content-Type':  'text/plain;charset=utf-8',
-        'Cache-Control': 'public, max-age=86400',  // cache 24 h — imagery dates don't change
+        'Cache-Control': 'public, max-age=86400',
         ...corsHeaders(origin),
       },
     });

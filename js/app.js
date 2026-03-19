@@ -33,9 +33,6 @@ const state = {
   svService:           null,
   markers:             [],     // parallel to results[]
   infoWindow:          null,
-  miniMap:             null,   // small reference map overlaid on viewer
-  miniMapInputMarker:  null,   // red dot = the requested input coordinate
-  panoHistoryControl:  null,   // history strip embedded in the panorama (visible in fullscreen)
   svDirectionMarker:   null,   // rotating heading indicator on the main overview map
 
   // Satellite History mode
@@ -464,23 +461,6 @@ function initMapAndPanorama() {
 
   // History strip embedded inside the panorama — remains visible in fullscreen
   // because Google Maps only shows descendants of its own container.
-  const panoHistoryEl = document.createElement('div');
-  panoHistoryEl.className = 'pano-history-control';
-  panoHistoryEl.innerHTML = '<div id="pano-history-timeline" class="pano-history-timeline"></div>';
-  state.panorama.controls[google.maps.ControlPosition.BOTTOM_CENTER].push(panoHistoryEl);
-  state.panoHistoryControl = panoHistoryEl;
-
-  // Mini reference map — linked to the panorama so the blue pegman + FOV
-  // cone update automatically as the user pans around in Street View.
-  state.miniMap = new google.maps.Map(document.getElementById('mini-map'), {
-    zoom:               18,
-    center:             CONFIG.DEFAULT_CENTER,
-    disableDefaultUI:   true,
-    gestureHandling:    'none',   // non-interactive — reference only
-    clickableIcons:     false,
-    mapTypeId:          'roadmap',
-  });
-  state.miniMap.setStreetView(state.panorama);
 }
 
 /* ============================================================
@@ -617,7 +597,6 @@ async function selectCoordinate(idx) {
   }
 
   openPanorama(result.panoId);
-  updateMiniMap(result.inputLat, result.inputLng, result.panoLat, result.panoLng);
   updateGoogleMapsLink(result.panoLat, result.panoLng, result.panoId);
   await loadAndRenderHistory(result.panoLat, result.panoLng);
 }
@@ -630,34 +609,10 @@ function openPanorama(panoId, pov) {
   state.panorama.setVisible(true);
 }
 
-function updateMiniMap(inputLat, inputLng, panoLat, panoLng) {
-  document.getElementById('mini-map').style.display = '';
-  // Keep mini map centred between the input point and the pano
-  state.miniMap.setCenter({ lat: panoLat, lng: panoLng });
-  state.miniMap.setZoom(18);
-
-  // Red dot = the requested input coordinate (target tree location)
-  if (state.miniMapInputMarker) state.miniMapInputMarker.setMap(null);
-  state.miniMapInputMarker = new google.maps.Marker({
-    position:  { lat: inputLat, lng: inputLng },
-    map:       state.miniMap,
-    title:     'Target coordinate',
-    zIndex:    10,
-    icon: {
-      path:        google.maps.SymbolPath.CIRCLE,
-      scale:       7,
-      fillColor:   '#dc2626',
-      fillOpacity: 1,
-      strokeColor: '#ffffff',
-      strokeWeight: 2,
-    },
-  });
-}
 
 function hidePanorama() {
   document.getElementById('viewer-placeholder').style.display = '';
   document.getElementById('viewer').style.display = 'none';
-  document.getElementById('mini-map').style.display = 'none';
   if (state.panorama) state.panorama.setVisible(false);
   if (state.svDirectionMarker) {
     state.svDirectionMarker.setVisible(false);
@@ -779,12 +734,10 @@ function setHistoryPanel(status, showFallback) {
 }
 
 function renderHistoryTimeline(panos) {
-  const timeline   = document.getElementById('history-timeline');
-  const panoStrip  = document.getElementById('pano-history-timeline');
-  const loadingEl  = document.getElementById('history-loading');
+  const timeline  = document.getElementById('history-timeline');
+  const loadingEl = document.getElementById('history-loading');
   loadingEl.style.display = 'none';
-  timeline.innerHTML  = '';
-  if (panoStrip) panoStrip.innerHTML = '';
+  timeline.innerHTML = '';
 
   // Deduplicate by date (keep one per month)
   const seen = new Set();
@@ -824,7 +777,6 @@ function renderHistoryTimeline(panos) {
     };
 
     timeline.appendChild(makeBtn());
-    if (panoStrip) panoStrip.appendChild(makeBtn());
   });
 }
 
@@ -1231,23 +1183,19 @@ function initSatelliteMap() {
  * response formats. Groups releases by year (most recent per year).
  */
 async function fetchWaybackYears() {
-  // Each entry describes [url, parserFn].
-  // Parser receives the parsed JSON and must return [{releaseNum, releaseDate, releaseDateLabel?}]
-  // or [] if this URL's format is not recognised.
+  const configParser = raw => Array.isArray(raw)
+    ? raw
+    : Object.entries(raw).map(([k, v]) => ({ releaseNum: parseInt(k, 10), ...v }));
+
+  // Try the Cloudflare Worker proxy first (solves CORS), then direct URLs.
+  const proxyBase = localStorage.getItem(CONFIG.LS_PROXY_URL) || '';
   const SOURCES = [
-    [
-      'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json',
-      raw => Array.isArray(raw)
-        ? raw
-        : Object.entries(raw).map(([k, v]) => ({ releaseNum: parseInt(k, 10), ...v })),
-    ],
-    [
-      'https://cdn.maptiles.arcgis.com/waybackconfig.json',
-      raw => Array.isArray(raw)
-        ? raw
-        : Object.entries(raw).map(([k, v]) => ({ releaseNum: parseInt(k, 10), ...v })),
-    ],
-    // ArcGIS MapServer REST endpoint — layers array where name contains the date
+    ...(proxyBase
+      ? [[ `${proxyBase.replace(/\/$/, '')}?action=wayback-config`, configParser ]]
+      : []),
+    [ 'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json', configParser ],
+    [ 'https://cdn.maptiles.arcgis.com/waybackconfig.json', configParser ],
+    // ArcGIS MapServer REST — layers array where each name contains the date
     [
       'https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer?f=json',
       raw => {
