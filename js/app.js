@@ -1307,7 +1307,7 @@ function loadSatOverlay(releaseNum) {
   state.satMap.overlayMapTypes.clear();
   state.satOverlay = new google.maps.ImageMapType({
     getTileUrl: (coord, zoom) =>
-      `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/${releaseNum}/${zoom}/${coord.y}/${coord.x}`,
+      `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/${releaseNum}/${zoom}/${coord.y}/${coord.x}`,
     tileSize:  new google.maps.Size(256, 256),
     maxZoom:   19,
     minZoom:   1,

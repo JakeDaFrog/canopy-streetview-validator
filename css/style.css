@@ -227,8 +227,8 @@ a:hover { text-decoration: underline; }
 
 .map-wrap {
   position: relative;
-  flex: 1 1 58%;
-  min-height: 240px;
+  flex: 1 1 52%;
+  min-height: 200px;
 }
 
 #map {
@@ -255,8 +255,8 @@ a:hover { text-decoration: underline; }
 
 /* viewer section */
 .viewer-wrap {
-  flex: 1 1 42%;
-  min-height: 200px;
+  flex: 1 1 48%;
+  min-height: 220px;
   display: flex;
   flex-direction: column;
   border-top: 2px solid var(--color-border);
