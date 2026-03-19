@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Demo Coordinates — Street View Canopy Validator</title>
+  <style>
+    /* ── Screen styles ── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: #f2f7f4;
+      color: #1c2b22;
+      padding: 40px 32px;
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 10px;
+    }
+
+    .logo { font-size: 2.2rem; }
+
+    .title-block h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1a6b3c;
+    }
+
+    .title-block p {
+      font-size: 0.85rem;
+      color: #5a7566;
+      margin-top: 3px;
+    }
+
+    .instructions {
+      background: #e8f5ee;
+      border: 1px solid #b7e4c7;
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-size: 0.82rem;
+      color: #1a6b3c;
+      margin-bottom: 28px;
+      line-height: 1.6;
+    }
+
+    .instructions strong { font-weight: 700; }
+
+    .instructions code {
+      font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+      background: rgba(0,0,0,.06);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 0.78rem;
+    }
+
+    /* ── City section ── */
+    .city {
+      margin-bottom: 32px;
+      break-inside: avoid;
+    }
+
+    .city-header {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      border-bottom: 2px solid #1a6b3c;
+      padding-bottom: 6px;
+      margin-bottom: 14px;
+    }
+
+    .city-header h2 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #1a6b3c;
+    }
+
+    .city-header .region {
+      font-size: 0.78rem;
+      color: #5a7566;
+      font-weight: 500;
+    }
+
+    /* ── Coordinate table ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+
+    thead th {
+      background: #1a6b3c;
+      color: #fff;
+      text-align: left;
+      padding: 7px 12px;
+      font-size: 0.73rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      font-weight: 600;
+    }
+
+    thead th:first-child { border-radius: 6px 0 0 0; }
+    thead th:last-child  { border-radius: 0 6px 0 0; }
+
+    tbody tr:nth-child(odd)  { background: #fff; }
+    tbody tr:nth-child(even) { background: #f5faf7; }
+
+    tbody tr:hover { background: #e8f5ee; }
+
+    td {
+      padding: 8px 12px;
+      border-bottom: 1px solid #e4eeea;
+      vertical-align: middle;
+    }
+
+    td.label   { font-weight: 600; color: #1c2b22; }
+    td.coords  { font-family: 'SF Mono', 'Fira Code', Consolas, monospace; font-size: 0.77rem; color: #1a6b3c; white-space: nowrap; }
+    td.note    { color: #5a7566; font-size: 0.78rem; }
+
+    /* ── Paste-ready block ── */
+    .paste-block {
+      margin-top: 10px;
+      background: #1e2d24;
+      border-radius: 6px;
+      padding: 12px 14px;
+      font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+      font-size: 0.73rem;
+      color: #7ec8a0;
+      line-height: 1.7;
+      white-space: pre;
+      overflow-x: auto;
+    }
+
+    .paste-label {
+      font-size: 0.7rem;
+      color: #5a7566;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      margin-top: 10px;
+      margin-bottom: 4px;
+    }
+
+    /* ── Footer ── */
+    footer {
+      margin-top: 32px;
+      padding-top: 14px;
+      border-top: 1px solid #cfe0d8;
+      font-size: 0.75rem;
+      color: #5a7566;
+      text-align: center;
+    }
+
+    /* ── Print styles ── */
+    @media print {
+      body { background: #fff; padding: 20px 24px; }
+      .instructions { background: #f0faf4; }
+      tbody tr:hover { background: inherit; }
+      .paste-block { color: #2d9e5e; background: #f5faf7; border: 1px solid #cfe0d8; }
+      .city { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="logo">🌳</div>
+    <div class="title-block">
+      <h1>Street View Canopy Validator — Demo Coordinates</h1>
+      <p>Sample sites for San Luis Obispo · San Francisco · Los Angeles</p>
+    </div>
+  </header>
+
+  <div class="instructions">
+    <strong>How to use:</strong> Copy the coordinates from any "Paste-ready" block below,
+    open the tool at <code>jakedafrog.github.io/canopy-streetview-validator</code>,
+    select the <strong>Paste / Type</strong> tab, paste in the coordinates, then click
+    <strong>Find Street Views</strong>. Click any result to load the 360° viewer and browse
+    the historical imagery timeline to identify when tree canopy changed.
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SAN LUIS OBISPO
+       ══════════════════════════════════════════════════════ -->
+  <div class="city">
+    <div class="city-header">
+      <h2>🌴 San Luis Obispo</h2>
+      <span class="region">Central Coast, California</span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Label</th>
+          <th>Latitude</th>
+          <th>Longitude</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="label">Higuera St (Downtown)</td>
+          <td class="coords">35.28130</td>
+          <td class="coords">-120.65990</td>
+          <td class="note">Dense street tree canopy, good history coverage</td>
+        </tr>
+        <tr>
+          <td class="label">Mitchell Park</td>
+          <td class="coords">35.28390</td>
+          <td class="coords">-120.65470</td>
+          <td class="note">Park edge — multiple capture years</td>
+        </tr>
+        <tr>
+          <td class="label">Chorro St</td>
+          <td class="coords">35.28170</td>
+          <td class="coords">-120.66300</td>
+          <td class="note">Mixed residential canopy</td>
+        </tr>
+        <tr>
+          <td class="label">Johnson Ave</td>
+          <td class="coords">35.27570</td>
+          <td class="coords">-120.64340</td>
+          <td class="note">Suburban street trees</td>
+        </tr>
+        <tr>
+          <td class="label">Laguna Lake</td>
+          <td class="coords">35.26870</td>
+          <td class="coords">-120.68910</td>
+          <td class="note">Park boundary, eucalyptus stand</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="paste-label">Paste-ready (copy &amp; paste into tool)</p>
+    <div class="paste-block">35.28130, -120.65990, Higuera St (Downtown)
+35.28390, -120.65470, Mitchell Park
+35.28170, -120.66300, Chorro St
+35.27570, -120.64340, Johnson Ave
+35.26870, -120.68910, Laguna Lake</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SAN FRANCISCO
+       ══════════════════════════════════════════════════════ -->
+  <div class="city">
+    <div class="city-header">
+      <h2>🌉 San Francisco</h2>
+      <span class="region">Bay Area, California</span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Label</th>
+          <th>Latitude</th>
+          <th>Longitude</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="label">Dolores St (Mission)</td>
+          <td class="coords">37.75960</td>
+          <td class="coords">-122.42690</td>
+          <td class="note">Iconic palm-lined median, long history record</td>
+        </tr>
+        <tr>
+          <td class="label">The Panhandle</td>
+          <td class="coords">37.77300</td>
+          <td class="coords">-122.44410</td>
+          <td class="note">GGP extension — dense historic canopy</td>
+        </tr>
+        <tr>
+          <td class="label">Haight-Ashbury</td>
+          <td class="coords">37.76940</td>
+          <td class="coords">-122.44690</td>
+          <td class="note">Residential street trees, captures since 2007</td>
+        </tr>
+        <tr>
+          <td class="label">McLaren Park</td>
+          <td class="coords">37.72080</td>
+          <td class="coords">-122.42940</td>
+          <td class="note">Large urban forest, visible removals in timeline</td>
+        </tr>
+        <tr>
+          <td class="label">Market St at Castro</td>
+          <td class="coords">37.76250</td>
+          <td class="coords">-122.43500</td>
+          <td class="note">High-traffic corridor, frequent recaptures</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="paste-label">Paste-ready (copy &amp; paste into tool)</p>
+    <div class="paste-block">37.75960, -122.42690, Dolores St (Mission)
+37.77300, -122.44410, The Panhandle
+37.76940, -122.44690, Haight-Ashbury
+37.72080, -122.42940, McLaren Park
+37.76250, -122.43500, Market St at Castro</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       LOS ANGELES
+       ══════════════════════════════════════════════════════ -->
+  <div class="city">
+    <div class="city-header">
+      <h2>🌆 Los Angeles</h2>
+      <span class="region">Southern California</span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Label</th>
+          <th>Latitude</th>
+          <th>Longitude</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="label">Los Feliz Blvd</td>
+          <td class="coords">34.10810</td>
+          <td class="coords">-118.29210</td>
+          <td class="note">Tree-lined boulevard, Griffith Park entrance</td>
+        </tr>
+        <tr>
+          <td class="label">Hancock Park</td>
+          <td class="coords">34.07000</td>
+          <td class="coords">-118.33880</td>
+          <td class="note">Mature residential canopy, good history depth</td>
+        </tr>
+        <tr>
+          <td class="label">Silver Lake</td>
+          <td class="coords">34.08930</td>
+          <td class="coords">-118.27430</td>
+          <td class="note">Mixed canopy neighbourhood</td>
+        </tr>
+        <tr>
+          <td class="label">Brentwood</td>
+          <td class="coords">34.04880</td>
+          <td class="coords">-118.47860</td>
+          <td class="note">Affluent suburb — high canopy coverage</td>
+        </tr>
+        <tr>
+          <td class="label">Griffith Observatory</td>
+          <td class="coords">34.11870</td>
+          <td class="coords">-118.30020</td>
+          <td class="note">Park perimeter, visible canopy change</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="paste-label">Paste-ready (copy &amp; paste into tool)</p>
+    <div class="paste-block">34.10810, -118.29210, Los Feliz Blvd
+34.07000, -118.33880, Hancock Park
+34.08930, -118.27430, Silver Lake
+34.04880, -118.47860, Brentwood
+34.11870, -118.30020, Griffith Observatory</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       ALL SITES COMBINED
+       ══════════════════════════════════════════════════════ -->
+  <div class="city">
+    <div class="city-header">
+      <h2>📋 All 15 Sites Combined</h2>
+      <span class="region">Paste this to load all three cities at once</span>
+    </div>
+    <div class="paste-block">35.28130, -120.65990, SLO — Higuera St (Downtown)
+35.28390, -120.65470, SLO — Mitchell Park
+35.28170, -120.66300, SLO — Chorro St
+35.27570, -120.64340, SLO — Johnson Ave
+35.26870, -120.68910, SLO — Laguna Lake
+37.75960, -122.42690, SF — Dolores St (Mission)
+37.77300, -122.44410, SF — The Panhandle
+37.76940, -122.44690, SF — Haight-Ashbury
+37.72080, -122.42940, SF — McLaren Park
+37.76250, -122.43500, SF — Market St at Castro
+34.10810, -118.29210, LA — Los Feliz Blvd
+34.07000, -118.33880, LA — Hancock Park
+34.08930, -118.27430, LA — Silver Lake
+34.04880, -118.47860, LA — Brentwood
+34.11870, -118.30020, LA — Griffith Observatory</div>
+  </div>
+
+  <footer>
+    Street View Canopy Validator · jakedafrog.github.io/canopy-streetview-validator · Demo use only
+  </footer>
+
+</body>
+</html>
