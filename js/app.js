@@ -35,6 +35,7 @@ const state = {
   infoWindow:          null,
   miniMap:             null,   // small reference map overlaid on viewer
   miniMapInputMarker:  null,   // red dot = the requested input coordinate
+  panoHistoryControl:  null,   // history strip embedded in the panorama (visible in fullscreen)
 
   // Satellite History mode
   satMap:              null,   // Google Map used in Satellite History panel
@@ -460,6 +461,14 @@ function initMapAndPanorama() {
     }
   );
 
+  // History strip embedded inside the panorama — remains visible in fullscreen
+  // because Google Maps only shows descendants of its own container.
+  const panoHistoryEl = document.createElement('div');
+  panoHistoryEl.className = 'pano-history-control';
+  panoHistoryEl.innerHTML = '<div id="pano-history-timeline" class="pano-history-timeline"></div>';
+  state.panorama.controls[google.maps.ControlPosition.BOTTOM_CENTER].push(panoHistoryEl);
+  state.panoHistoryControl = panoHistoryEl;
+
   // Mini reference map — linked to the panorama so the blue pegman + FOV
   // cone update automatically as the user pans around in Street View.
   state.miniMap = new google.maps.Map(document.getElementById('mini-map'), {
@@ -766,10 +775,12 @@ function setHistoryPanel(status, showFallback) {
 }
 
 function renderHistoryTimeline(panos) {
-  const timeline  = document.getElementById('history-timeline');
-  const loadingEl = document.getElementById('history-loading');
+  const timeline   = document.getElementById('history-timeline');
+  const panoStrip  = document.getElementById('pano-history-timeline');
+  const loadingEl  = document.getElementById('history-loading');
   loadingEl.style.display = 'none';
-  timeline.innerHTML = '';
+  timeline.innerHTML  = '';
+  if (panoStrip) panoStrip.innerHTML = '';
 
   // Deduplicate by date (keep one per month)
   const seen = new Set();
@@ -781,27 +792,35 @@ function renderHistoryTimeline(panos) {
   });
 
   unique.forEach(item => {
-    const btn = document.createElement('button');
-    btn.className = 'history-btn';
-    btn.title = `Panorama ID: ${item.panoId}\nDate: ${item.date || 'Unknown'}`;
-    btn.innerHTML = `
-      <span class="history-date">${formatDate(item.date)}</span>
-      <span class="history-id">${item.panoId.slice(0, 8)}…</span>
-    `;
-    btn.addEventListener('click', () => {
-      // Preserve the current heading and pitch so the user keeps looking
-      // in the same direction after switching to a different year.
-      const currentPov = (state.panorama && state.panorama.getVisible())
-        ? state.panorama.getPov()
-        : null;
-      document.querySelectorAll('.history-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      openPanorama(item.panoId, currentPov);
-      if (item.lat && item.lng) {
-        state.map.panTo({ lat: item.lat, lng: item.lng });
-      }
-    });
-    timeline.appendChild(btn);
+    // Build a button for a given parent container; all share the same click logic.
+    const makeBtn = () => {
+      const btn = document.createElement('button');
+      btn.className = 'history-btn';
+      btn.dataset.pano = item.panoId;
+      btn.title = `Panorama ID: ${item.panoId}\nDate: ${item.date || 'Unknown'}`;
+      btn.innerHTML = `
+        <span class="history-date">${formatDate(item.date)}</span>
+        <span class="history-id">${item.panoId.slice(0, 8)}…</span>
+      `;
+      btn.addEventListener('click', () => {
+        // Preserve heading/pitch so the user keeps looking the same direction.
+        const currentPov = (state.panorama && state.panorama.getVisible())
+          ? state.panorama.getPov()
+          : null;
+        // Mark active in both the main panel and the in-panorama strip.
+        document.querySelectorAll('.history-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll(`.history-btn[data-pano="${item.panoId}"]`)
+          .forEach(b => b.classList.add('active'));
+        openPanorama(item.panoId, currentPov);
+        if (item.lat && item.lng) {
+          state.map.panTo({ lat: item.lat, lng: item.lng });
+        }
+      });
+      return btn;
+    };
+
+    timeline.appendChild(makeBtn());
+    if (panoStrip) panoStrip.appendChild(makeBtn());
   });
 }
 
@@ -1143,47 +1162,63 @@ function initSatelliteMap() {
 
 /**
  * Fetch the ESRI Wayback release catalogue.
- * Groups releases by year (most recent release per year) and stores them in
- * state.satYears so the year pills can be rendered on demand.
+ * Tries two known URLs in sequence and handles both array and keyed-object
+ * response formats. Groups releases by year (most recent per year).
  */
 async function fetchWaybackYears() {
-  try {
-    const resp = await fetch(
-      'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json'
-    );
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const items = await resp.json();
+  const URLS = [
+    'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json',
+    'https://cdn.maptiles.arcgis.com/waybackconfig.json',
+  ];
 
-    // One entry per calendar year — keep the highest releaseNum (most recent)
-    const byYear = {};
-    items.forEach(item => {
-      const year = item.releaseDate ? item.releaseDate.slice(0, 4) : null;
-      if (!year) return;
-      if (!byYear[year] || item.releaseNum > byYear[year].releaseNum) {
-        byYear[year] = {
-          releaseNum: item.releaseNum,
-          year,
-          label: item.releaseDateLabel || year,
-        };
+  for (const url of URLS) {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) continue;
+      const raw = await resp.json();
+
+      // The config may be an array [{releaseNum, releaseDate, …}]
+      // or an object keyed by release number {"10011": {releaseDate, …}}.
+      const itemsArr = Array.isArray(raw)
+        ? raw
+        : Object.entries(raw).map(([key, val]) => ({
+            releaseNum: parseInt(key, 10), ...val,
+          }));
+
+      const byYear = {};
+      itemsArr.forEach(item => {
+        if (!item.releaseNum || !item.releaseDate) return;
+        const year = String(item.releaseDate).slice(0, 4);
+        if (!byYear[year] || item.releaseNum > byYear[year].releaseNum) {
+          byYear[year] = {
+            releaseNum: item.releaseNum,
+            year,
+            label: item.releaseDateLabel || year,
+          };
+        }
+      });
+
+      const years = Object.values(byYear).sort((a, b) => b.year.localeCompare(a.year));
+      if (!years.length) continue;   // try next URL if nothing parsed
+
+      state.satYears = years;
+
+      // Re-render pills if the user is already in sat mode with a coord open
+      if (state.currentViewerMode === 'sat' &&
+          document.getElementById('sat-map').style.display !== 'none') {
+        renderSatYearPills();
       }
-    });
-
-    // Newest year first
-    state.satYears = Object.values(byYear).sort((a, b) => b.year.localeCompare(a.year));
-
-    // If the user is already in sat mode with a coord selected, render pills now
-    if (state.currentViewerMode === 'sat' &&
-        document.getElementById('sat-map').style.display !== 'none') {
-      renderSatYearPills();
-    }
-  } catch (e) {
-    console.warn('[SatHistory] Could not fetch Wayback config:', e.message);
-    document.getElementById('sat-year-loading').style.display = 'none';
-    if (state.currentViewerMode === 'sat') {
-      document.getElementById('sat-year-timeline').innerHTML =
-        '<span class="muted">Could not load imagery years. Check your connection.</span>';
+      return;   // success — stop trying
+    } catch (e) {
+      console.warn(`[SatHistory] Fetch failed (${url}):`, e.message);
     }
   }
+
+  // All URLs failed — update the UI wherever it is now
+  console.error('[SatHistory] Could not load Wayback config from any URL');
+  document.getElementById('sat-year-loading').style.display = 'none';
+  document.getElementById('sat-year-timeline').innerHTML =
+    '<span class="muted">Could not load imagery years.</span>';
 }
 
 /**
