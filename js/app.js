@@ -79,7 +79,7 @@ function loadGoogleMaps(apiKey) {
 window._onMapsReady = function () {
   initMapAndPanorama();
   setupMapsListeners();   // listeners that require google.maps to exist
-  fetchWaybackYears();    // fetch ESRI Wayback release list in background
+  initWaybackYears();     // populate ESRI Wayback year list from hardcoded data
   showApp();
 };
 
@@ -1153,75 +1153,28 @@ function initSatelliteMap() {
 }
 
 /**
- * Fetch the ESRI Wayback release catalogue.
- * Uses the MapServer REST endpoint which supports CORS, grouped by year.
- * Falls back to the Cloudflare Worker proxy if BAKED_PROXY_URL is set.
+ * Populate state.satYears from the hardcoded ESRI Wayback release table.
+ * Release IDs and dates were extracted from the Wayback config JSON on 2026-03-19.
+ * Each entry is the most recent snapshot within its year.
+ * No network request needed — tiles load directly from ESRI's CDN.
  */
-async function fetchWaybackYears() {
-  const proxyBase = localStorage.getItem(CONFIG.LS_PROXY_URL) || CONFIG.BAKED_PROXY_URL || '';
-
-  // MapServer REST endpoint is CORS-accessible (unlike the S3 config bucket).
-  // Try the worker proxy first if configured, then direct.
-  const SOURCES = [
-    ...(proxyBase ? [`${proxyBase.replace(/\/$/, '')}?action=wayback-config`] : []),
-    'https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer?f=json',
+function initWaybackYears() {
+  // releaseNum = integer key from waybackconfig.json (used in tile URLs)
+  state.satYears = [
+    { releaseNum: 64001, year: '2026', label: '2026-02-26' },
+    { releaseNum: 13192, year: '2025', label: '2025-12-18' },
+    { releaseNum: 16453, year: '2024', label: '2024-12-12' },
+    { releaseNum: 56102, year: '2023', label: '2023-12-07' },
+    { releaseNum: 45134, year: '2022', label: '2022-12-14' },
+    { releaseNum: 26120, year: '2021', label: '2021-12-21' },
+    { releaseNum: 29260, year: '2020', label: '2020-12-16' },
+    { releaseNum:  4756, year: '2019', label: '2019-12-12' },
+    { releaseNum: 23448, year: '2018', label: '2018-12-14' },
+    { releaseNum: 25521, year: '2017', label: '2017-11-16' },
+    { releaseNum: 18966, year: '2016', label: '2016-12-20' },
+    { releaseNum: 28163, year: '2015', label: '2015-12-16' },
+    { releaseNum:  5844, year: '2014', label: '2014-12-30' },
   ];
-
-  for (const url of SOURCES) {
-    try {
-      const ctrl  = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 6000);
-      const resp  = await fetch(url, { signal: ctrl.signal });
-      clearTimeout(timer);
-      if (!resp.ok) continue;
-
-      const raw = await resp.json();
-
-      // Worker returns the Wayback config JSON (keyed object or array);
-      // direct MapServer returns { layers: [{id, name}] }.
-      let items = [];
-      if (raw.layers && Array.isArray(raw.layers)) {
-        // MapServer REST: layer name contains the date
-        const re = /(\d{4}-\d{2}-\d{2})/;
-        items = raw.layers.map(l => {
-          const m = String(l.name || '').match(re);
-          return m ? { releaseNum: l.id, releaseDate: m[1] } : null;
-        }).filter(Boolean);
-      } else {
-        // Worker proxies the Wayback config (array or keyed object)
-        const arr = Array.isArray(raw)
-          ? raw
-          : Object.entries(raw).map(([k, v]) => ({ releaseNum: parseInt(k, 10), ...v }));
-        items = arr.filter(i => i.releaseNum && i.releaseDate);
-      }
-
-      // One release per year (most recent)
-      const byYear = {};
-      items.forEach(({ releaseNum, releaseDate }) => {
-        const year = String(releaseDate).slice(0, 4);
-        if (!byYear[year] || releaseNum > byYear[year].releaseNum) {
-          byYear[year] = { releaseNum, year, label: releaseDate };
-        }
-      });
-
-      const years = Object.values(byYear).sort((a, b) => b.year.localeCompare(a.year));
-      if (!years.length) continue;
-
-      state.satYears = years;
-      if (state.currentViewerMode === 'sat' &&
-          document.getElementById('sat-map').style.display !== 'none') {
-        renderSatYearPills();
-      }
-      return;
-    } catch (e) {
-      console.warn(`[SatHistory] Fetch failed (${url}):`, e.message);
-    }
-  }
-
-  console.error('[SatHistory] Could not load Wayback release list');
-  document.getElementById('sat-year-loading').style.display = 'none';
-  document.getElementById('sat-year-timeline').innerHTML =
-    '<span class="muted">Could not load imagery years.</span>';
 }
 
 /**
@@ -1327,7 +1280,7 @@ function renderSatYearPills() {
   });
 
   // Auto-load on first render (no previous selection)
-  if (!state.satCurrentRelease) {
+  if (!state.satCurrentRelease && state.satYears.length) {
     loadSatOverlay(state.satYears[0].releaseNum);
   }
 }
@@ -1335,6 +1288,7 @@ function renderSatYearPills() {
 /**
  * Load ESRI Wayback tiles for the given release number as an overlay
  * on top of the Google Maps satellite base layer.
+ * URL pattern from waybackconfig.json itemURL field.
  */
 function loadSatOverlay(releaseNum) {
   if (!state.satMap) return;
@@ -1342,7 +1296,7 @@ function loadSatOverlay(releaseNum) {
   state.satMap.overlayMapTypes.clear();
   state.satOverlay = new google.maps.ImageMapType({
     getTileUrl: (coord, zoom) =>
-      `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/${releaseNum}/${zoom}/${coord.y}/${coord.x}`,
+      `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/${releaseNum}/${zoom}/${coord.y}/${coord.x}`,
     tileSize:  new google.maps.Size(256, 256),
     maxZoom:   23,
     minZoom:   1,
