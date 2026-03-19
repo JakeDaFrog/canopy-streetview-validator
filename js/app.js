@@ -612,11 +612,11 @@ async function selectCoordinate(idx) {
   await loadAndRenderHistory(result.panoLat, result.panoLng);
 }
 
-function openPanorama(panoId) {
+function openPanorama(panoId, pov) {
   document.getElementById('viewer-placeholder').style.display = 'none';
   document.getElementById('viewer').style.display = '';
   state.panorama.setPano(panoId);
-  state.panorama.setPov({ heading: 0, pitch: 0 });
+  state.panorama.setPov(pov || { heading: 0, pitch: 0 });
   state.panorama.setVisible(true);
 }
 
@@ -789,9 +789,14 @@ function renderHistoryTimeline(panos) {
       <span class="history-id">${item.panoId.slice(0, 8)}…</span>
     `;
     btn.addEventListener('click', () => {
+      // Preserve the current heading and pitch so the user keeps looking
+      // in the same direction after switching to a different year.
+      const currentPov = (state.panorama && state.panorama.getVisible())
+        ? state.panorama.getPov()
+        : null;
       document.querySelectorAll('.history-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      openPanorama(item.panoId);
+      openPanorama(item.panoId, currentPov);
       if (item.lat && item.lng) {
         state.map.panTo({ lat: item.lat, lng: item.lng });
       }
